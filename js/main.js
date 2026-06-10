@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SITES, EPILOGUE } from './sites.js';
 
 /* ============================================================
@@ -76,8 +77,10 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xe9dfc7);
 scene.fog = new THREE.Fog(0xe9dfc7, 150, 330);
 
-const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.5, 600);
-const CAM_OFFSET = new THREE.Vector3(0, 34, 42);
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.4, 600);
+// Third-person follow camera: orbits the player, drag to look around.
+const cam = { yaw: 0, height: 5, dist: 11, lastDrag: -10 };
+const occluders = []; // meshes the camera should not clip through
 
 const hemi = new THREE.HemisphereLight(0xfff6e0, 0xcdbf9d, 0.95);
 scene.add(hemi);
@@ -263,10 +266,39 @@ waterLabel('THE BATTERY', -2, 108, 0, 30);
 
 /* ---------------- streets ---------------- */
 
-const streetMat = lambert(COLORS.street);
+// Belgian-block (cobblestone) paving, drawn once and tiled.
+function makeCobbleTexture() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#c5b896';
+  ctx.fillRect(0, 0, 128, 128);
+  const rowH = 16;
+  for (let row = 0; row < 8; row++) {
+    const off = (row % 2) * 16;
+    for (let col = -1; col < 5; col++) {
+      const x = col * 32 + off, y = row * rowH;
+      const shade = 0.92 + Math.random() * 0.13;
+      ctx.fillStyle = `rgb(${Math.round(190 * shade)},${Math.round(177 * shade)},${Math.round(143 * shade)})`;
+      ctx.fillRect(x + 1.5, y + 1.5, 29, 13);
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  return tex;
+}
+const cobbleTex = makeCobbleTexture();
+const streetMat = new THREE.MeshLambertMaterial({ map: cobbleTex, color: 0xfFf6e2 });
+
+function scaleUV(geo, ru, rv) {
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * ru, uv.getY(i) * rv);
+}
 
 function streetPlane(len, wide) {
   const geo = new THREE.PlaneGeometry(len, wide);
+  scaleUV(geo, len / 3.2, wide / 3.2);
   geo.rotateX(-Math.PI / 2);
   const m = new THREE.Mesh(geo, streetMat);
   m.receiveShadow = true;
@@ -291,6 +323,7 @@ for (const x of AVENUES) {
   }
   if (zmax - zmin > 6) {
     const geo = new THREE.PlaneGeometry(2.8, zmax - zmin - 2);
+    scaleUV(geo, 2.8 / 3.2, (zmax - zmin - 2) / 3.2);
     geo.rotateX(-Math.PI / 2);
     const m = new THREE.Mesh(geo, streetMat);
     m.receiveShadow = true;
@@ -309,11 +342,109 @@ for (const path of DOWNTOWN_PATHS) {
   }
 }
 
-/* ---------------- buildings ---------------- */
+/* ---------------- buildings: 1890 New York ----------------
+   Brownstone and brick rowhouses with cornices and stoops line the grid;
+   cast-iron lofts and older walk-ups crowd downtown; Trinity Church and the
+   new gold-domed World Building (1890) mark the skyline. Everything is
+   merged into a handful of meshes for performance. */
 
-const placements = [];
+const FLOOR_H = 3.0;  // one storey
+const BAY_W = 2.0;    // one window bay
 
-function tryPlace(x, z, w, d, h) {
+function makeFacadeTexture(p) {
+  const W = 128, H = 160;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = p.wall;
+  ctx.fillRect(0, 0, W, H);
+
+  if (p.style === 'brick') {
+    ctx.fillStyle = p.joint;
+    for (let y = 0; y < H; y += 10) {
+      ctx.fillRect(0, y, W, 1);
+      const off = ((y / 10) % 2) * 16;
+      for (let x = -16; x < W; x += 32) ctx.fillRect(x + off, y, 1, 10);
+    }
+  } else if (p.style === 'stone') {
+    ctx.fillStyle = p.joint;
+    for (let y = 0; y < H; y += 26) ctx.fillRect(0, y, W, 1.5);
+    for (let x = 0; x < W; x += 42) ctx.fillRect(x, 0, 1.5, H);
+  } else if (p.style === 'brownstone') {
+    ctx.fillStyle = p.joint;
+    for (let y = 0; y < H; y += 32) ctx.fillRect(0, y, W, 1.5);
+  } else if (p.style === 'castiron') {
+    // slender pilasters at the bay edges
+    ctx.fillStyle = p.joint;
+    ctx.fillRect(0, 0, 7, H);
+    ctx.fillRect(W - 7, 0, 7, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(7, 0, 2, H);
+    ctx.fillRect(W - 9, 0, 2, H);
+  }
+
+  // window: lintel, frame, 2-over-2 sash, sill
+  const wx = p.style === 'castiron' ? 26 : 36;
+  const wx2 = W - wx;
+  const wy = 32, wy2 = 128;
+  ctx.fillStyle = p.trim;
+  ctx.fillRect(wx - 7, wy - 12, wx2 - wx + 14, 10);          // lintel
+  ctx.fillRect(wx - 6, wy2 + 2, wx2 - wx + 12, 8);           // sill
+  ctx.fillStyle = '#2c2824';
+  ctx.fillRect(wx - 3, wy - 3, wx2 - wx + 6, wy2 - wy + 6);  // frame
+  const glass = ctx.createLinearGradient(0, wy, 0, wy2);
+  glass.addColorStop(0, '#6a7682');
+  glass.addColorStop(0.45, '#414c57');
+  glass.addColorStop(1, '#37404a');
+  ctx.fillStyle = glass;
+  ctx.fillRect(wx, wy, wx2 - wx, wy2 - wy);
+  ctx.fillStyle = '#221f1b';
+  const midY = (wy + wy2) / 2, midX = (wx + wx2) / 2;
+  ctx.fillRect(wx, midY - 2, wx2 - wx, 4);                   // meeting rail
+  ctx.fillRect(midX - 1, wy, 2, wy2 - wy);                   // muntin
+  ctx.fillStyle = 'rgba(255,255,255,0.13)';
+  ctx.fillRect(wx + 3, wy + 3, (wx2 - wx) / 2 - 6, (wy2 - wy) / 3); // glint
+
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+const FACADES = [
+  { style: 'brownstone', wall: '#7d5743', joint: 'rgba(0,0,0,0.13)', trim: '#5e4233' },
+  { style: 'brick', wall: '#8f4c3a', joint: 'rgba(0,0,0,0.16)', trim: '#cfc2a4' },
+  { style: 'brick', wall: '#a86743', joint: 'rgba(0,0,0,0.14)', trim: '#d8cbab' },
+  { style: 'castiron', wall: '#cfc2a4', joint: 'rgba(0,0,0,0.2)', trim: '#bdb091' },
+  { style: 'stone', wall: '#9b9183', joint: 'rgba(0,0,0,0.15)', trim: '#b3a995' },
+];
+const facadeMats = FACADES.map((p) => new THREE.MeshLambertMaterial({ map: makeFacadeTexture(p) }));
+const facadeGeos = FACADES.map(() => []);
+const trimGeos = [];  // cornices, chimneys, stoops — one dark material
+const tankGeos = [];  // rooftop water tanks
+
+function facadeBox(x, z, w, d, floors) {
+  const h = floors * FLOOR_H;
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const uv = geo.attributes.uv;
+  // faces: +x, -x, +y, -y, +z, -z (4 verts each)
+  const reps = [
+    [Math.max(1, Math.round(d / BAY_W)), floors],
+    [Math.max(1, Math.round(d / BAY_W)), floors],
+    [0.02, 0.02], [0.02, 0.02],
+    [Math.max(1, Math.round(w / BAY_W)), floors],
+    [Math.max(1, Math.round(w / BAY_W)), floors],
+  ];
+  for (let f = 0; f < 6; f++) {
+    for (let v = 4 * f; v < 4 * f + 4; v++) {
+      uv.setXY(v, uv.getX(v) * reps[f][0], uv.getY(v) * reps[f][1]);
+    }
+  }
+  geo.translate(x, h / 2, z);
+  return geo;
+}
+
+function canStand(x, z, w, d) {
   const corners = [
     [x - w / 2, z - d / 2], [x + w / 2, z - d / 2],
     [x - w / 2, z + d / 2], [x + w / 2, z + d / 2],
@@ -321,66 +452,179 @@ function tryPlace(x, z, w, d, h) {
   if (!corners.every(([cx, cz]) => pointInPoly(cx, cz))) return false;
   if (corners.some(([cx, cz]) => inClearZone(cx, cz)) || inClearZone(x, z)) return false;
   if (z > 13 && (nearDowntownPath(x, z) || corners.some(([cx, cz]) => nearDowntownPath(cx, cz)))) return false;
-  placements.push({ x, z, w, d, h });
   return true;
 }
 
-// Grid blocks between avenues and streets.
+function addBuilding(x, z, w, d, floors, pi, { stoop = false, tank = 'auto' } = {}) {
+  if (!canStand(x, z, w, d)) return false;
+  const h = floors * FLOOR_H;
+  facadeGeos[pi].push(facadeBox(x, z, w, d, floors));
+  // heavy Italianate cornice; its top doubles as the (hidden) roof
+  const cornice = new THREE.BoxGeometry(w + 0.4, 0.6, d + 0.4);
+  cornice.translate(x, h + 0.1, z);
+  trimGeos.push(cornice);
+  // chimneys
+  const nCh = Math.floor(Math.random() * 3);
+  for (let c = 0; c < nCh; c++) {
+    const ch = new THREE.BoxGeometry(0.32, 0.8, 0.32);
+    ch.translate(x + (Math.random() - 0.5) * (w - 0.8), h + 0.7, z + (Math.random() - 0.5) * (d - 0.8));
+    trimGeos.push(ch);
+  }
+  // high stoop on the street side
+  if (stoop && Math.random() < 0.55) {
+    const st = new THREE.BoxGeometry(1.1, 0.6, 0.9);
+    st.translate(x + (Math.random() - 0.5) * (w - 1.4), 0.3, z + (d / 2 + 0.42) * (stoop === 'north' ? -1 : 1));
+    trimGeos.push(st);
+  }
+  // wooden water tank on the taller blocks
+  if ((tank === 'auto' && floors >= 5 && Math.random() < 0.3) || tank === true) {
+    const tx = x + (Math.random() - 0.5) * (w - 1.6), tz = z + (Math.random() - 0.5) * (d - 1.6);
+    const base = new THREE.BoxGeometry(1.5, 0.5, 1.5);
+    base.translate(tx, h + 0.55, tz);
+    trimGeos.push(base);
+    const drum = new THREE.CylinderGeometry(0.62, 0.68, 1.2, 9);
+    drum.translate(tx, h + 1.4, tz);
+    tankGeos.push(drum);
+    const cap = new THREE.ConeGeometry(0.74, 0.5, 9);
+    cap.translate(tx, h + 2.25, tz);
+    tankGeos.push(cap);
+  }
+  addCollider(x, z, w, d, 0.5);
+  return true;
+}
+
+// Rowhouse strips along every gridded block, facing the streets.
 for (let ai = 0; ai < AVENUES.length - 1; ai++) {
   for (let si = 0; si < STREETS.length - 1; si++) {
-    const x0 = AVENUES[ai] + 2.2, x1 = AVENUES[ai + 1] - 2.2;
-    const z1 = STREETS[si] - 1.9, z0 = STREETS[si + 1] + 1.9; // STREETS descends
-    if (x1 - x0 < 3 || z1 - z0 < 2.5) continue;
-    const n = 1 + Math.floor(Math.random() * 2);
-    for (let k = 0; k < n; k++) {
-      const w = 2.6 + Math.random() * 2.4;
-      const d = 2.2 + Math.random() * 1.6;
-      const x = x0 + w / 2 + Math.random() * Math.max(0.1, x1 - x0 - w);
-      const z = z0 + d / 2 + Math.random() * Math.max(0.1, z1 - z0 - d);
-      const h = 2.6 + Math.random() * 5.5;
-      tryPlace(x, z, w, d, h);
+    const x0 = AVENUES[ai] + 1.9, x1 = AVENUES[ai + 1] - 1.9;
+    const zN = STREETS[si + 1] + 1.4, zS = STREETS[si] - 1.4; // north has smaller z
+    if (x1 - x0 < 2.5 || zS - zN < 4.6) continue;
+    for (const side of ['north', 'south']) {
+      const depth = 2.4;
+      const zc = side === 'north' ? zN + depth / 2 : zS - depth / 2;
+      let cursor = x0;
+      while (cursor < x1 - 1.6) {
+        let w = 2.2 + Math.random() * 2.2;
+        if (cursor + w > x1) w = x1 - cursor;
+        if (w < 1.6) break;
+        const floors = 3 + Math.floor(Math.random() * 3); // 3–5 storeys
+        const pi = Math.floor(Math.random() * FACADES.length);
+        addBuilding(cursor + w / 2, zc, w - 0.15, depth, floors, pi === 3 ? 0 : pi, { stoop: side });
+        cursor += w;
+      }
     }
   }
 }
-// Crooked downtown, scattered more densely.
-for (let k = 0; k < 170; k++) {
+// Crooked downtown: older, lower walk-ups and cast-iron lofts.
+for (let k = 0; k < 150; k++) {
   const x = -40 + Math.random() * 70;
   const z = 15 + Math.random() * 76;
-  const w = 2.4 + Math.random() * 2.4;
-  const d = 2.2 + Math.random() * 2;
-  const h = 2.6 + Math.random() * 5;
-  tryPlace(x, z, w, d, h);
-}
-// A few church spires for the skyline (Trinity among them).
-const spires = [[-15, 40], [6, -20], [-26, -60], [20, -10]];
-for (const [sx, sz] of spires) {
-  if (tryPlace(sx, sz, 3.4, 3.4, 11)) {
-    const top = placements[placements.length - 1];
-    const spire = new THREE.Mesh(new THREE.ConeGeometry(1.6, 5, 4), lambert(0x8d8474));
-    spire.position.set(top.x, top.h + 2.5, top.z);
-    spire.castShadow = true;
-    scene.add(spire);
-  }
+  const w = 2.6 + Math.random() * 2.2;
+  const d = 2.4 + Math.random() * 1.8;
+  const floors = 3 + Math.floor(Math.random() * 3);
+  const pi = Math.random() < 0.3 ? 3 : Math.floor(Math.random() * FACADES.length);
+  addBuilding(x, z, w, d, floors, pi);
 }
 
-const palette = [0xd9c9a8, 0xc9a98e, 0xb08968, 0x9a6b54, 0xb5b0a3, 0xc4b694].map((c) => new THREE.Color(c));
-const buildGeo = new THREE.BoxGeometry(1, 1, 1);
-buildGeo.translate(0, 0.5, 0);
-const buildings = new THREE.InstancedMesh(buildGeo, lambert(0xffffff), placements.length);
-const mtx = new THREE.Matrix4();
-placements.forEach((p, i) => {
-  mtx.compose(
-    new THREE.Vector3(p.x, 0, p.z),
-    new THREE.Quaternion(),
-    new THREE.Vector3(p.w, p.h, p.d)
-  );
-  buildings.setMatrixAt(i, mtx);
-  buildings.setColorAt(i, palette[Math.floor(Math.random() * palette.length)]);
-  addCollider(p.x, p.z, p.w, p.d);
+// Trinity Church (its spire ruled the skyline until 1890).
+{
+  const tx = -15, tz = 40;
+  const dark = lambert(0x6b5240);
+  const nave = box(4, 9, 6.5, 0x6b5240, tx, 4.5, tz + 1.5);
+  nave.castShadow = true;
+  const towerT = box(2.6, 17, 2.6, 0x6b5240, tx, 8.5, tz - 2.6);
+  towerT.castShadow = true;
+  const spireT = new THREE.Mesh(new THREE.ConeGeometry(1.9, 9, 8), dark);
+  spireT.position.set(tx, 21.5, tz - 2.6);
+  spireT.castShadow = true;
+  scene.add(spireT);
+  addCollider(tx, tz, 4.5, 11);
+  occluders.push(nave, towerT);
+}
+// The New York World (Pulitzer) Building, 1890 — its gilded dome brand new.
+{
+  const wx = 8, wz = 34;
+  if (canStand(wx, wz, 5, 5)) {
+    facadeGeos[2].push(facadeBox(wx, wz, 5, 5, 9));
+    const cornice = new THREE.BoxGeometry(5.5, 0.7, 5.5);
+    cornice.translate(wx, 27.1, wz);
+    trimGeos.push(cornice);
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.9, 2.2, 12), lambert(0xb59478));
+    drum.position.set(wx, 28.5, wz);
+    drum.castShadow = true;
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(1.75, 14, 10),
+      new THREE.MeshPhongMaterial({ color: COLORS.gold, emissive: 0x4a3a0c, shininess: 90 })
+    );
+    dome.position.set(wx, 30.4, wz);
+    dome.scale.y = 1.25;
+    dome.castShadow = true;
+    scene.add(drum, dome);
+    addCollider(wx, wz, 5, 5, 0.5);
+  }
+}
+// Two parish churches uptown.
+for (const [cx, cz] of [[-26, -56], [16, -16]]) {
+  if (!canStand(cx, cz, 3.6, 5.5)) continue;
+  const body = box(3.6, 7.5, 5.5, 0x8d8474, cx, 3.75, cz);
+  body.castShadow = true;
+  const sp = new THREE.Mesh(new THREE.ConeGeometry(1.5, 6.5, 4), lambert(0x77705f));
+  sp.position.set(cx, 10.7, cz - 1);
+  sp.castShadow = true;
+  scene.add(sp);
+  addCollider(cx, cz, 3.6, 5.5);
+  occluders.push(body);
+}
+
+// Merge and add the city.
+const trimMat = lambert(0x4a4039);
+const tankMat = lambert(0x8a6f4d);
+facadeGeos.forEach((geos, i) => {
+  if (!geos.length) return;
+  const mesh = new THREE.Mesh(mergeGeometries(geos, false), facadeMats[i]);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  occluders.push(mesh);
 });
-buildings.castShadow = true;
-buildings.receiveShadow = true;
-scene.add(buildings);
+if (trimGeos.length) {
+  const mesh = new THREE.Mesh(mergeGeometries(trimGeos, false), trimMat);
+  mesh.castShadow = true;
+  scene.add(mesh);
+}
+if (tankGeos.length) {
+  const mesh = new THREE.Mesh(mergeGeometries(tankGeos, false), tankMat);
+  mesh.castShadow = true;
+  scene.add(mesh);
+}
+
+/* ---------------- gas lamps ---------------- */
+{
+  const poleGeos = [], lampGeos = [];
+  const lampSpots = [];
+  for (const x of AVENUES) {
+    for (let z = -104; z <= 8; z += 16) {
+      lampSpots.push([x + 1.7, z + 4], [x - 1.7, z - 4]);
+    }
+  }
+  for (const [lx, lz] of lampSpots) {
+    if (!pointInPoly(lx, lz) || inClearZone(lx, lz)) continue;
+    if (Math.random() < 0.5) continue;
+    const pole = new THREE.CylinderGeometry(0.06, 0.09, 2.7, 5);
+    pole.translate(lx, 1.35, lz);
+    poleGeos.push(pole);
+    const lamp = new THREE.BoxGeometry(0.26, 0.34, 0.26);
+    lamp.translate(lx, 2.85, lz);
+    lampGeos.push(lamp);
+  }
+  if (poleGeos.length) {
+    scene.add(new THREE.Mesh(mergeGeometries(poleGeos, false), lambert(0x33302c)));
+    scene.add(new THREE.Mesh(
+      mergeGeometries(lampGeos, false),
+      new THREE.MeshLambertMaterial({ color: 0xf5e9c0, emissive: 0x8a7430 })
+    ));
+  }
+}
 
 /* ---------------- parks & trees ---------------- */
 
@@ -427,11 +671,12 @@ function tree(x, z, s = 1) {
 }
 // Castle Garden
 {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.6, 2.6, 14), lambert(COLORS.stone));
-  m.position.set(-8, 1.3, 91);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.6, 3.4, 14), lambert(COLORS.stone));
+  m.position.set(-8, 1.7, 91);
   m.castShadow = m.receiveShadow = true;
   scene.add(m);
   addCollider(-8, 91, 7, 7);
+  occluders.push(m);
 }
 
 /* ---------------- landmarks ---------------- */
@@ -439,35 +684,39 @@ function tree(x, z, s = 1) {
 // Melville's house, 104 E 26th St — brick row house facing the street.
 {
   const hx = 18, hz = -83.5;
-  const house = box(4.4, 7, 6, COLORS.brick, hx, 3.5, hz);
+  const house = box(4.4, 9.6, 6, COLORS.brick, hx, 4.8, hz);
   addCollider(hx, hz, 4.4, 6);
-  box(4.8, 0.5, 6.4, 0x6e4a3a, hx, 7.15, hz); // cornice
-  box(1.2, 2.2, 0.3, 0x274029, hx - 0.8, 1.1, hz + 3.05); // green door
-  box(2.4, 0.5, 1.6, 0xb5a98c, hx - 0.8, 0.25, hz + 3.7); // stoop
-  // window lintels
-  for (let fy = 2.6; fy <= 6; fy += 1.7) {
+  box(4.9, 0.6, 6.5, 0x6e4a3a, hx, 9.85, hz); // cornice
+  box(1.2, 2.6, 0.3, 0x274029, hx - 0.9, 1.5, hz + 3.05); // green door
+  box(2.4, 0.6, 1.7, 0xb5a98c, hx - 0.9, 0.3, hz + 3.75); // high stoop
+  // window lintels and sashes on the street face
+  for (const fy of [2.4, 5.4, 8.2]) {
     for (let wx = -1.3; wx <= 1.3; wx += 1.3) {
-      box(0.78, 1.05, 0.12, 0x36302a, hx + wx, fy, hz + 3.02, scene, false);
+      if (fy < 3 && wx < 0) continue; // door occupies that bay
+      box(0.82, 1.4, 0.12, 0x36302a, hx + wx, fy, hz + 3.02, scene, false);
+      box(0.6, 1.1, 0.13, 0x46525c, hx + wx, fy, hz + 3.03, scene, false);
     }
   }
   house.castShadow = true;
+  occluders.push(house);
 }
 
 // Madison Square Garden (1890) with its tower and the gilded Diana.
 let diana;
 {
-  const g = box(17, 8, 9.5, 0xc8a583, -4, 4, -86.5);
+  const g = box(17, 12, 9.5, 0xc8a583, -4, 6, -86.5);
   g.castShadow = true;
   addCollider(-4, -86.5, 17, 9.5);
-  box(17.6, 0.7, 10.1, 0xa9886a, -4, 8.3, -86.5);
-  const tower = box(4.6, 24, 4.6, 0xc8a583, 2, 12, -84);
+  box(17.6, 0.8, 10.1, 0xa9886a, -4, 12.4, -86.5);
+  const tower = box(4.6, 30, 4.6, 0xc8a583, 2, 15, -84);
   tower.castShadow = true;
   addCollider(2, -84, 4.6, 4.6);
-  box(3.4, 3, 3.4, 0xb59478, 2, 25.5, -84); // loggia
+  box(3.4, 3.2, 3.4, 0xb59478, 2, 31.6, -84); // loggia
   const cap = new THREE.Mesh(new THREE.ConeGeometry(2.2, 3, 8), lambert(0xa9886a));
-  cap.position.set(2, 28.5, -84);
+  cap.position.set(2, 34.8, -84);
   cap.castShadow = true;
   scene.add(cap);
+  occluders.push(g, tower);
   // Diana, gilded, turning like a weathervane
   diana = new THREE.Group();
   const goldMat = new THREE.MeshPhongMaterial({ color: COLORS.gold, emissive: 0x6b5410, shininess: 100 });
@@ -482,7 +731,7 @@ let diana;
   arrow.position.set(0.55, 1.25, 0);
   arrow.rotation.x = Math.PI / 2;
   diana.add(bodyD, headD, bow, arrow);
-  diana.position.set(2, 30, -84);
+  diana.position.set(2, 36.3, -84);
   scene.add(diana);
 }
 
@@ -728,10 +977,16 @@ legL.position.set(-0.24, 0.95, 0);
 legR.position.set(0.24, 0.95, 0);
 legL.castShadow = legR.castShadow = true;
 player.add(legL, legR);
+player.scale.setScalar(0.58); // a man among five-storey buildings
 player.position.set(0, 0, 70);
+player.rotation.y = Math.PI; // facing north, up the island
 scene.add(player);
 
-camera.position.copy(player.position).add(CAM_OFFSET);
+camera.position.set(
+  player.position.x + Math.sin(cam.yaw) * cam.dist,
+  cam.height,
+  player.position.z + Math.cos(cam.yaw) * cam.dist
+);
 camera.lookAt(player.position);
 
 /* ---------------- input ---------------- */
@@ -743,49 +998,61 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
-const joy = { active: false, id: null, ox: 0, oy: 0, dx: 0, dy: 0 };
+// Touch: left side of the screen is a walk joystick, everywhere else
+// (and the mouse on desktop) drags the camera around the player.
+const joy = { id: null, ox: 0, oy: 0, dx: 0, dy: 0 };
+const look = { id: null, lx: 0, ly: 0 };
 const joyEl = document.getElementById('joystick');
 const stickEl = document.getElementById('stick');
 
-window.addEventListener('touchstart', (e) => {
-  if (!state.started || state.modal) return;
-  for (const t of e.changedTouches) {
-    if (t.target.closest && t.target.closest('button, #chart-key, .overlay')) continue;
-    if (joy.active) continue;
-    joy.active = true;
-    joy.id = t.identifier;
-    joy.ox = t.clientX;
-    joy.oy = t.clientY;
+function onUi(e) {
+  return e.target.closest && e.target.closest('button, #chart-key, .overlay, #compass');
+}
+
+window.addEventListener('pointerdown', (e) => {
+  if (!state.started || state.modal || onUi(e)) return;
+  const wantsJoy = e.pointerType === 'touch' && e.clientX < window.innerWidth * 0.45;
+  if (wantsJoy && joy.id === null) {
+    joy.id = e.pointerId;
+    joy.ox = e.clientX;
+    joy.oy = e.clientY;
     joy.dx = joy.dy = 0;
     joyEl.classList.remove('hidden');
-    joyEl.style.left = `${t.clientX - 55}px`;
-    joyEl.style.top = `${t.clientY - 55}px`;
+    joyEl.style.left = `${e.clientX - 55}px`;
+    joyEl.style.top = `${e.clientY - 55}px`;
     stickEl.style.transform = 'translate(0,0)';
+  } else if (look.id === null) {
+    look.id = e.pointerId;
+    look.lx = e.clientX;
+    look.ly = e.clientY;
   }
-}, { passive: true });
-window.addEventListener('touchmove', (e) => {
-  for (const t of e.changedTouches) {
-    if (joy.active && t.identifier === joy.id) {
-      const dx = t.clientX - joy.ox, dy = t.clientY - joy.oy;
-      const len = Math.hypot(dx, dy) || 1;
-      const cl = Math.min(len, 42);
-      joy.dx = (dx / len) * (cl / 42);
-      joy.dy = (dy / len) * (cl / 42);
-      stickEl.style.transform = `translate(${(dx / len) * cl}px, ${(dy / len) * cl}px)`;
-    }
+});
+window.addEventListener('pointermove', (e) => {
+  if (e.pointerId === joy.id) {
+    const dx = e.clientX - joy.ox, dy = e.clientY - joy.oy;
+    const len = Math.hypot(dx, dy) || 1;
+    const cl = Math.min(len, 42);
+    joy.dx = (dx / len) * (cl / 42);
+    joy.dy = (dy / len) * (cl / 42);
+    stickEl.style.transform = `translate(${(dx / len) * cl}px, ${(dy / len) * cl}px)`;
+  } else if (e.pointerId === look.id) {
+    cam.yaw -= (e.clientX - look.lx) * 0.0055;
+    cam.height = Math.min(13, Math.max(2.4, cam.height + (e.clientY - look.ly) * 0.035));
+    look.lx = e.clientX;
+    look.ly = e.clientY;
+    cam.lastDrag = clock.elapsedTime;
   }
-}, { passive: true });
-function endTouch(e) {
-  for (const t of e.changedTouches) {
-    if (joy.active && t.identifier === joy.id) {
-      joy.active = false;
-      joy.dx = joy.dy = 0;
-      joyEl.classList.add('hidden');
-    }
+});
+function endPointer(e) {
+  if (e.pointerId === joy.id) {
+    joy.id = null;
+    joy.dx = joy.dy = 0;
+    joyEl.classList.add('hidden');
   }
+  if (e.pointerId === look.id) look.id = null;
 }
-window.addEventListener('touchend', endTouch);
-window.addEventListener('touchcancel', endTouch);
+window.addEventListener('pointerup', endPointer);
+window.addEventListener('pointercancel', endPointer);
 
 /* ---------------- UI ---------------- */
 
@@ -800,6 +1067,7 @@ const cardEl = document.getElementById('card');
 const epilogueEl = document.getElementById('epilogue');
 const progressEl = document.getElementById('progress');
 const compassArrow = document.getElementById('compass-arrow');
+const compassDial = document.getElementById('compass-dial');
 
 const keyList = document.getElementById('key-list');
 [...SITES].sort((a, b) => a.num - b.num).forEach((s) => {
@@ -878,10 +1146,10 @@ document.getElementById('epilogue-close').addEventListener('click', () => {
 
 /* ---------------- movement & loop ---------------- */
 
-const SPEED = 14;
-const vel = new THREE.Vector3();
+const SPEED = 7.5;
 let walkPhase = 0;
 const clock = new THREE.Clock();
+const camRay = new THREE.Raycaster();
 
 function moveInput() {
   let mx = 0, mz = 0;
@@ -924,31 +1192,51 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
-  // --- player ---
-  let moving = 0;
+  // --- player (movement is camera-relative) ---
+  let moving = 0, dirX = 0, dirZ = 0;
   if (state.started && !state.modal) {
     const [mx, mz] = moveInput();
     moving = Math.hypot(mx, mz);
     if (moving > 0.01) {
-      let nx = player.position.x + mx * SPEED * dt;
-      let nz = player.position.z + mz * SPEED * dt;
+      const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw);   // camera forward
+      const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);    // camera right
+      dirX = rx * mx + fx * -mz;
+      dirZ = rz * mx + fz * -mz;
+      let nx = player.position.x + dirX * SPEED * dt;
+      let nz = player.position.z + dirZ * SPEED * dt;
       if (!isWalkable(nx, player.position.z)) nx = player.position.x;
       if (!isWalkable(nx, nz)) nz = player.position.z;
       [nx, nz] = collide(nx, nz);
       if (isWalkable(nx, nz)) player.position.set(nx, 0, nz);
-      player.rotation.y = angleLerp(player.rotation.y, Math.atan2(mx, mz), 0.18);
+      player.rotation.y = angleLerp(player.rotation.y, Math.atan2(dirX, dirZ), 0.2);
     }
   }
-  walkPhase += dt * (4 + moving * 8);
+  walkPhase += dt * (4 + moving * 9);
   const swing = moving > 0.01 ? 0.62 : 0;
   legL.rotation.x = Math.sin(walkPhase) * swing;
   legR.rotation.x = -Math.sin(walkPhase) * swing;
-  player.position.y = moving > 0.01 ? Math.abs(Math.sin(walkPhase)) * 0.16 : 0;
+  player.position.y = moving > 0.01 ? Math.abs(Math.sin(walkPhase)) * 0.1 : 0;
 
-  // --- camera ---
-  const camTarget = new THREE.Vector3().copy(player.position).add(CAM_OFFSET);
-  camera.position.lerp(camTarget, 1 - Math.pow(0.0015, dt));
-  camera.lookAt(player.position.x, player.position.y + 1.6, player.position.z);
+  // --- camera: orbit the player, settle in behind him when walking ---
+  if (moving > 0.01 && t - cam.lastDrag > 2.2) {
+    cam.yaw = angleLerp(cam.yaw, Math.atan2(dirX, dirZ) + Math.PI, 1 - Math.pow(0.55, dt));
+  }
+  const head = new THREE.Vector3(player.position.x, 1.9, player.position.z);
+  const desired = new THREE.Vector3(
+    player.position.x + Math.sin(cam.yaw) * cam.dist,
+    cam.height,
+    player.position.z + Math.cos(cam.yaw) * cam.dist
+  );
+  const toCam = desired.clone().sub(head);
+  const fullDist = toCam.length();
+  toCam.normalize();
+  camRay.set(head, toCam);
+  camRay.far = fullDist;
+  const blocked = camRay.intersectObjects(occluders, false);
+  const camDist = blocked.length ? Math.max(2.2, blocked[0].distance - 0.5) : fullDist;
+  const camPos = head.clone().addScaledVector(toCam, camDist);
+  camera.position.lerp(camPos, 1 - Math.pow(0.0008, dt));
+  camera.lookAt(player.position.x, player.position.y + 1.7, player.position.z);
   sun.position.set(player.position.x + 70, 100, player.position.z + 45);
   sun.target.position.set(player.position.x, 0, player.position.z);
 
@@ -981,9 +1269,14 @@ function animate() {
     const d = Math.hypot(player.position.x - m.site.pos.x, player.position.z - m.site.pos.z);
     if (d < best) { best = d; target = m; }
   }
+  compassDial.style.transform = `rotate(${(cam.yaw * 180) / Math.PI}deg)`;
   if (target) {
-    const ang = Math.atan2(target.site.pos.x - player.position.x, -(target.site.pos.z - player.position.z));
-    compassArrow.style.transform = `rotate(${(ang * 180) / Math.PI}deg)`;
+    const dx = target.site.pos.x - player.position.x;
+    const dz = target.site.pos.z - player.position.z;
+    const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw);
+    const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+    const rel = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
+    compassArrow.style.transform = `rotate(${(rel * 180) / Math.PI}deg)`;
     compassArrow.style.opacity = '1';
   } else {
     compassArrow.style.opacity = '0.15';

@@ -1,0 +1,356 @@
+:root {
+  --parchment: #efe6d0;
+  --parchment-dark: #e3d7bb;
+  --ink: #2b2620;
+  --ink-soft: #5a5142;
+  --red: #b23a2c;
+  --teal: #9dbdb9;
+  --gold: #c9a227;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--parchment);
+  font-family: 'EB Garamond', Georgia, serif;
+  color: var(--ink);
+  -webkit-text-size-adjust: 100%;
+}
+
+#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+.hidden { display: none !important; }
+.red { color: var(--red); font-weight: 600; }
+
+/* ---------- overlays ---------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  padding: 18px;
+  background: rgba(43, 38, 32, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+#intro { background: var(--parchment); }
+
+.intro-inner {
+  max-width: 620px;
+  text-align: center;
+  padding: 30px 26px;
+  animation: fadein 0.9s ease;
+}
+
+@keyframes fadein { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; } }
+
+.rule-top, .rule-bottom {
+  height: 10px;
+  margin: 0 auto 26px;
+  max-width: 420px;
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+}
+.rule-bottom { margin: 26px auto 0; border-top: 1px solid var(--ink); border-bottom: 2px solid var(--ink); }
+
+h1 {
+  font-family: 'IM Fell English SC', 'EB Garamond', serif;
+  font-weight: 400;
+  font-size: clamp(34px, 7vw, 58px);
+  letter-spacing: 0.14em;
+  line-height: 1.05;
+}
+
+.subtitle {
+  font-style: italic;
+  font-size: clamp(15px, 3vw, 19px);
+  color: var(--ink-soft);
+  margin-top: 8px;
+}
+
+blockquote {
+  margin: 26px auto 0;
+  max-width: 480px;
+  font-style: italic;
+  font-size: clamp(15px, 2.6vw, 18px);
+  line-height: 1.5;
+  color: var(--ink);
+}
+blockquote cite { display: block; margin-top: 8px; font-size: 0.85em; font-style: normal; color: var(--ink-soft); }
+
+.intro-text {
+  margin: 22px auto 0;
+  max-width: 460px;
+  font-size: clamp(15px, 2.6vw, 18px);
+  line-height: 1.55;
+}
+
+.controls-hint {
+  margin: 22px auto 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.controls-hint b { color: var(--ink); letter-spacing: 0.08em; }
+
+button {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 18px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 12px 34px;
+  margin-top: 26px;
+  color: var(--parchment);
+  background: var(--red);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  box-shadow: 0 3px 0 #7d2418;
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+button:hover { transform: translateY(-1px); }
+button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
+
+/* ---------- HUD ---------- */
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+
+#hud-top {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+}
+#hud-title {
+  font-family: 'IM Fell English SC', serif;
+  font-size: clamp(15px, 2.6vw, 21px);
+  letter-spacing: 0.22em;
+  color: var(--ink);
+  text-shadow: 0 1px 0 rgba(239, 230, 208, 0.9);
+}
+#progress {
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink-soft);
+  text-shadow: 0 1px 0 rgba(239, 230, 208, 0.9);
+}
+
+#chart-key {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 232px;
+  pointer-events: auto;
+  background: rgba(239, 230, 208, 0.93);
+  border: 1.5px solid var(--ink);
+  box-shadow: 3px 3px 0 rgba(43, 38, 32, 0.25);
+  padding: 10px 14px;
+  font-size: 14px;
+}
+#chart-key summary {
+  font-family: 'IM Fell English SC', serif;
+  letter-spacing: 0.16em;
+  font-size: 15px;
+  cursor: pointer;
+  list-style: none;
+}
+#chart-key summary::-webkit-details-marker { display: none; }
+#chart-key summary::after { content: ' ▾'; font-size: 11px; }
+#chart-key:not([open]) summary::after { content: ' ▸'; }
+#key-list { margin: 8px 0 2px; padding-left: 0; list-style: none; }
+#key-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  line-height: 1.25;
+  color: var(--ink-soft);
+}
+#key-list li .knum {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--red);
+  color: var(--parchment);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(2px);
+}
+#key-list li.done { color: var(--ink); }
+#key-list li.done .knum { background: var(--ink); }
+#key-list li.done::after { content: '✓'; margin-left: auto; color: var(--red); font-weight: 600; }
+
+#compass {
+  position: absolute;
+  bottom: 18px;
+  right: 18px;
+  width: 56px;
+  height: 56px;
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+  background: rgba(239, 230, 208, 0.9);
+  box-shadow: 2px 2px 0 rgba(43, 38, 32, 0.25);
+}
+#compass::after {
+  content: 'N';
+  position: absolute;
+  top: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+#compass-arrow {
+  position: absolute;
+  inset: 0;
+  transition: transform 0.2s linear;
+}
+#compass-arrow::before {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 17px solid var(--red);
+}
+
+/* ---------- visit button / toast ---------- */
+#visit-btn {
+  position: fixed;
+  bottom: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  margin: 0;
+  font-size: 17px;
+  padding: 11px 26px;
+  animation: bob 1.4s ease-in-out infinite;
+}
+@keyframes bob { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-4px); } }
+
+#toast {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  background: rgba(43, 38, 32, 0.88);
+  color: var(--parchment);
+  font-style: italic;
+  font-size: 15px;
+  padding: 9px 20px;
+  border-radius: 3px;
+  max-width: 86vw;
+  text-align: center;
+  transition: opacity 0.5s ease;
+}
+
+/* ---------- site card ---------- */
+.card-inner {
+  position: relative;
+  max-width: 560px;
+  max-height: 86vh;
+  overflow-y: auto;
+  background: var(--parchment);
+  border: 2px solid var(--ink);
+  box-shadow: 6px 6px 0 rgba(43, 38, 32, 0.4);
+  padding: 34px 32px 28px;
+  text-align: center;
+  animation: fadein 0.35s ease;
+}
+
+.card-seal {
+  width: 44px;
+  height: 44px;
+  margin: -56px auto 10px;
+  border-radius: 50%;
+  background: var(--red);
+  border: 3px solid var(--parchment);
+  box-shadow: 0 0 0 1.5px var(--ink);
+  color: var(--parchment);
+  font-size: 21px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-inner h2 {
+  font-family: 'IM Fell English SC', serif;
+  font-weight: 400;
+  font-size: clamp(22px, 4.6vw, 30px);
+  letter-spacing: 0.06em;
+  line-height: 1.15;
+}
+
+.dates { font-style: italic; color: var(--ink-soft); margin-top: 4px; font-size: 16px; }
+
+#card-body, #epilogue-body {
+  margin-top: 16px;
+  text-align: left;
+  font-size: clamp(15px, 2.4vw, 17.5px);
+  line-height: 1.58;
+}
+#card-body p + p, #epilogue-body p + p { margin-top: 10px; }
+#card-body em, #epilogue-body em { color: var(--ink); }
+
+.artifact {
+  margin-top: 18px;
+  padding: 9px 14px;
+  border: 1px dashed var(--ink-soft);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--ink-soft);
+}
+.artifact b { color: var(--red); font-style: normal; }
+
+#card-close, #epilogue-close { margin-top: 20px; }
+
+.epilogue-inner { max-width: 600px; }
+.epilogue-inner h2 { margin-top: 14px; }
+.ep-quote { margin-top: 18px; }
+
+/* ---------- joystick ---------- */
+#joystick {
+  position: fixed;
+  z-index: 15;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(43, 38, 32, 0.5);
+  background: rgba(239, 230, 208, 0.25);
+  pointer-events: none;
+}
+#stick {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  left: 32px;
+  top: 32px;
+  border-radius: 50%;
+  background: rgba(178, 58, 44, 0.75);
+  border: 1.5px solid rgba(43, 38, 32, 0.6);
+}
+
+@media (max-width: 700px) {
+  #chart-key { width: 188px; font-size: 12.5px; top: 60px; }
+  #chart-key summary { font-size: 13px; }
+  #hud-top { top: 8px; }
+  .card-inner { padding: 30px 20px 24px; }
+  #compass { bottom: auto; top: 60px; left: 14px; right: auto; width: 46px; height: 46px; }
+  #compass-arrow::before { top: 7px; border-left-width: 5px; border-right-width: 5px; border-bottom-width: 14px; }
+}

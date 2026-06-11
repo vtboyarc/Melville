@@ -1956,7 +1956,6 @@ const cardEl = document.getElementById('card');
 const epilogueEl = document.getElementById('epilogue');
 const progressEl = document.getElementById('progress');
 const compassArrow = document.getElementById('compass-arrow');
-const compassDial = document.getElementById('compass-dial');
 
 const viewBtn = document.getElementById('view-btn');
 function toggleView() {
@@ -2230,14 +2229,13 @@ function animate() {
     const d = Math.hypot(player.position.x - m.site.pos.x, player.position.z - m.site.pos.z);
     if (d < best) { best = d; target = m; }
   }
-  compassDial.style.transform = `rotate(${(effYaw * 180) / Math.PI}deg)`;
+  // North-up compass: N stays fixed at the top, the arrow shows the true
+  // map bearing of the nearest uncharted site (matching the chart view).
   if (target) {
     const dx = target.site.pos.x - player.position.x;
     const dz = target.site.pos.z - player.position.z;
-    const fx = -Math.sin(effYaw), fz = -Math.cos(effYaw);
-    const rx = Math.cos(effYaw), rz = -Math.sin(effYaw);
-    const rel = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
-    compassArrow.style.transform = `rotate(${(rel * 180) / Math.PI}deg)`;
+    const bearing = Math.atan2(dx, -dz);
+    compassArrow.style.transform = `rotate(${(bearing * 180) / Math.PI}deg)`;
     compassArrow.style.opacity = '1';
   } else {
     compassArrow.style.opacity = '0.15';

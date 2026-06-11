@@ -63,6 +63,12 @@ export const SITES = [
        Resided from 1863–1891 at This Site.”</em>`,
     ],
     artifact: 'The manuscript of Billy Budd, tied with ribbon',
+    image: {
+      src: 'assets/melville-plaque.webp',
+      alt: 'The bronze Herman Melville plaque at 104 East 26th Street',
+      caption: `The bronze tablet at the site today, placed by the Herman
+        Melville Society in January 1982.`,
+    },
   },
   {
     id: 'diana',
@@ -82,6 +88,12 @@ export const SITES = [
        Philadelphia Museum of Art.`,
     ],
     artifact: 'A gilded arrow, still warm from the sun',
+    image: {
+      src: 'assets/diana-tower.jpg',
+      alt: 'Saint-Gaudens’s Diana atop the Madison Square Garden tower',
+      caption: `Diana drawing her bow atop Stanford White's Madison Square
+        Garden tower, high over the rooftops Melville knew.`,
+    },
   },
   {
     id: 'el',

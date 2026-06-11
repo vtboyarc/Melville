@@ -50,12 +50,19 @@ for (let z = 12; z >= -104; z -= 8) STREETS.push(z);
 const EL_X = 30; // Third Avenue El runs along x = 30, z in [-109, 0]
 
 const CLEAR_CIRCLES = SITES.map((s) => ({ x: s.pos.x, z: s.pos.z, r: 8.5 }));
-CLEAR_CIRCLES.push({ x: 18, z: -84, r: 5.5 });  // the house itself
-CLEAR_CIRCLES.push({ x: -8, z: 91, r: 6 });     // Castle Garden
-CLEAR_CIRCLES.push({ x: 19, z: 46, r: 7 });     // bridge approach
+CLEAR_CIRCLES.push({ x: 18, z: -84, r: 5.5 });   // the house itself
+CLEAR_CIRCLES.push({ x: -8, z: 91, r: 6 });      // Castle Garden
+CLEAR_CIRCLES.push({ x: 19, z: 46, r: 7 });      // bridge approach
+CLEAR_CIRCLES.push({ x: 2, z: 49, r: 8 });       // City Hall and its park
+CLEAR_CIRCLES.push({ x: -2, z: 39.5, r: 5 });    // Federal Hall
+CLEAR_CIRCLES.push({ x: 12.5, z: 44, r: 5 });    // Tribune Building
+CLEAR_CIRCLES.push({ x: -1.5, z: 57, r: 5 });    // Western Union Building
+CLEAR_CIRCLES.push({ x: 20, z: -4, r: 6 });      // Cooper Union
+CLEAR_CIRCLES.push({ x: -17, z: -76, r: 7 });    // Fifth Avenue Hotel
 const CLEAR_RECTS = [
   { x0: -15, x1: 7, z0: -93, z1: -80 },   // Madison Square Garden block
   { x0: -12, x1: 10, z0: -80, z1: -68 },  // Madison Square Park
+  { x0: -11, x1: 7, z0: -45, z1: -35 },   // Union Square
 ];
 
 const DOWNTOWN_PATHS = [
@@ -906,6 +913,253 @@ for (const [cx, cz] of [[-26, -56], [16, -16]]) {
   occluders.push(body);
 }
 
+/* ---------------- landmarks of Melville's New York ----------------
+   Everything here stood within his lifetime (by September 1891). */
+
+const landmarkLabels = [];
+function landmarkLabel(text, x, y, z) {
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 80;
+  const ctx = cv.getContext('2d');
+  ctx.font = `500 42px 'EB Garamond', Georgia, serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '6px';
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = 'rgba(239,230,208,0.85)';
+  ctx.strokeText(text, 256, 42);
+  ctx.fillStyle = 'rgba(43,38,32,0.95)';
+  ctx.fillText(text, 256, 42);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  sprite.renderOrder = 5;
+  sprite.position.set(x, y, z);
+  sprite.scale.set(13, 2.03, 1);
+  scene.add(sprite);
+  landmarkLabels.push({ sprite, x, z });
+  return sprite;
+}
+
+// The Statue of Liberty (1886) — five years old, her copper still brown.
+{
+  const lx = -52, lz = 132;
+  box(11, 1.6, 11, COLORS.outerLand, lx, -0.6, lz, scene, false); // Bedloe's Island
+  box(6.5, 1.6, 6.5, 0xa39782, lx, 0.8, lz); // star fort base
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.9, 7, 4), lambert(0xb9ad97));
+  pedestal.rotation.y = Math.PI / 4;
+  pedestal.position.set(lx, 5.1, lz);
+  pedestal.castShadow = true;
+  scene.add(pedestal);
+  const copper = lambert(0x7a5b46);
+  const robe = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.85, 7.6, 9), copper);
+  robe.position.set(lx, 12.4, lz);
+  robe.castShadow = true;
+  const headL = new THREE.Mesh(new THREE.SphereGeometry(0.72, 10, 8), copper);
+  headL.position.set(lx, 16.7, lz);
+  scene.add(robe, headL);
+  for (let i = 0; i < 7; i++) { // the crown's rays
+    const ray = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.85, 5), copper);
+    const a = -Math.PI / 2 + (i / 6) * Math.PI;
+    ray.position.set(lx + Math.cos(a) * 0.75, 17.2 + Math.sin(a) * 0.5, lz);
+    ray.rotation.z = -a + Math.PI / 2;
+    scene.add(ray);
+  }
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 4.6, 7), copper);
+  arm.position.set(lx + 1.3, 18.2, lz);
+  arm.rotation.z = -0.38;
+  arm.castShadow = true;
+  const torch = new THREE.Mesh(
+    new THREE.ConeGeometry(0.5, 1.2, 7),
+    new THREE.MeshPhongMaterial({ color: COLORS.gold, emissive: 0x6b5410, shininess: 90 })
+  );
+  torch.position.set(lx + 2.15, 20.9, lz);
+  const tablet = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.6, 0.28), copper);
+  tablet.position.set(lx - 1.5, 14.4, lz);
+  tablet.rotation.z = 0.25;
+  scene.add(arm, torch, tablet);
+  landmarkLabel('Statue of Liberty · 1886', lx, 24.5, lz);
+}
+
+// Governors Island with round Castle Williams (1811).
+{
+  box(13, 1.6, 10, COLORS.outerLand, 44, -0.6, 126, scene, false);
+  const fort = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3, 2.6, 16), lambert(0xb08d6e));
+  fort.position.set(41, 1.5, 124);
+  fort.castShadow = true;
+  scene.add(fort);
+  landmarkLabel('Governors Island', 44, 7, 126);
+}
+
+// City Hall (1812) in its park.
+{
+  const geo = new THREE.CircleGeometry(4.5, 18);
+  geo.rotateX(-Math.PI / 2);
+  const green = new THREE.Mesh(geo, lambert(COLORS.park));
+  green.receiveShadow = true;
+  green.position.set(2, 0.1, 45);
+  scene.add(green);
+  tree(-1, 44, 0.8);
+  tree(5, 46, 0.9);
+  const hall = box(7, 6.5, 4, 0xded6c2, 2, 3.25, 51);
+  hall.castShadow = true;
+  box(7.4, 0.5, 4.4, 0xc7bda5, 2, 6.75, 51);
+  box(2.6, 2.2, 2.6, 0xded6c2, 2, 8.1, 51); // attic pavilion
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1, 1.6, 10), lambert(0xd5ccb6));
+  drum.position.set(2, 10, 51);
+  const cupola = new THREE.Mesh(new THREE.SphereGeometry(0.95, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), lambert(0xb3a479));
+  cupola.position.set(2, 10.8, 51);
+  scene.add(drum, cupola);
+  addCollider(2, 51, 7, 4);
+  occluders.push(hall);
+  landmarkLabel('City Hall · 1812', 2, 14, 51);
+}
+
+// Federal Hall (1842), Washington's statue (1883) on its steps.
+{
+  const fx = -2, fz = 39.5;
+  box(4.4, 1, 3.6, 0xcfc8b4, fx, 0.5, fz);
+  box(4.6, 0.7, 1.2, 0xc2bba6, fx, 0.35, fz + 2.2); // steps
+  box(4.2, 3, 2.4, 0xcfc8b4, fx, 2.5, fz - 0.5);
+  for (let i = -2; i <= 2; i++) {
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 2.6, 8), lambert(0xd8d1bd));
+    col.position.set(fx + i * 0.85, 2.3, fz + 0.9);
+    scene.add(col);
+  }
+  const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 1.4, 4), lambert(0xcfc8b4));
+  ped.rotation.y = Math.PI / 4;
+  ped.position.set(fx, 1.7, fz + 2.3);
+  const gw = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.3, 1.3, 7), lambert(0x3a4138));
+  gw.position.set(fx, 3.05, fz + 2.3);
+  const gwHead = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), lambert(0x3a4138));
+  gwHead.position.set(fx, 3.85, fz + 2.3);
+  scene.add(ped, gw, gwHead);
+  // pediment
+  const shape = new THREE.Shape([
+    new THREE.Vector2(-2.3, 0), new THREE.Vector2(2.3, 0), new THREE.Vector2(0, 1.1),
+  ]);
+  const pedi = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.7, bevelEnabled: false }), lambert(0xd8d1bd));
+  pedi.position.set(fx, 3.9, fz + 0.6);
+  pedi.castShadow = true;
+  scene.add(pedi);
+  addCollider(fx, fz, 4.4, 3.6);
+  landmarkLabel('Federal Hall', fx, 8, fz);
+}
+
+// The Tribune Building (1875) — tall brick, clock tower over Park Row.
+{
+  const tx = 12.5, tz = 44;
+  const tower = box(4, 14, 4, 0x7e4034, tx, 7, tz);
+  tower.castShadow = true;
+  box(4.4, 0.5, 4.4, 0x5e3026, tx, 14.2, tz);
+  const upper = box(2.2, 5.5, 2.2, 0x7e4034, tx, 17.2, tz);
+  upper.castShadow = true;
+  const clock = new THREE.Mesh(new THREE.CircleGeometry(0.55, 14), new THREE.MeshBasicMaterial({ color: 0xefe6d0 }));
+  clock.position.set(tx, 18.6, tz + 1.12);
+  scene.add(clock);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(1.7, 2.6, 4), lambert(0x4a3a30));
+  cap.rotation.y = Math.PI / 4;
+  cap.position.set(tx, 21.2, tz);
+  cap.castShadow = true;
+  scene.add(cap);
+  addCollider(tx, tz, 4, 4);
+  occluders.push(tower);
+  landmarkLabel('Tribune Building · 1875', tx, 25.5, tz);
+}
+
+// The Western Union Telegraph Building (1875) on lower Broadway.
+{
+  const wx = -1.5, wz = 57;
+  const main = box(4.5, 11.5, 4, 0x6d5b4d, wx, 5.75, wz);
+  main.castShadow = true;
+  box(4.9, 0.5, 4.4, 0x53453a, wx, 11.7, wz);
+  const mansard = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 2.6, 2.6, 4), lambert(0x3f3630));
+  mansard.rotation.y = Math.PI / 4;
+  mansard.position.set(wx, 13.2, wz);
+  mansard.castShadow = true;
+  scene.add(mansard);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3, 5), lambert(0x33302c));
+  pole.position.set(wx, 16, wz);
+  scene.add(pole);
+  addCollider(wx, wz, 4.5, 4);
+  occluders.push(main);
+  landmarkLabel('Western Union Bldg · 1875', wx, 19.5, wz);
+}
+
+// Cooper Union (1859), in whose Great Hall Lincoln spoke in 1860.
+{
+  const cx = 20, cz = -4;
+  const block = box(5, 8.5, 6.5, 0x6a4a39, cx, 4.25, cz);
+  block.castShadow = true;
+  box(5.4, 0.6, 6.9, 0x52382b, cx, 8.8, cz);
+  for (let i = -1; i <= 1; i++) { // round-arched bays hinted with piers
+    box(0.5, 7.5, 0.3, 0x7d5a46, cx + i * 1.7, 3.75, cz + 3.3, scene, false);
+  }
+  addCollider(cx, cz, 5, 6.5);
+  occluders.push(block);
+  landmarkLabel('Cooper Union · 1859', cx, 12.5, cz);
+}
+
+// Union Square (1839), with the equestrian Washington of 1856.
+{
+  const geo = new THREE.PlaneGeometry(16, 9);
+  geo.rotateX(-Math.PI / 2);
+  const green = new THREE.Mesh(geo, lambert(COLORS.park));
+  green.receiveShadow = true;
+  green.position.set(-2, 0.1, -40);
+  scene.add(green);
+  for (let i = 0; i < 7; i++) {
+    const tx2 = -9 + Math.random() * 14, tz2 = -43.6 + Math.random() * 7.2;
+    if (Math.hypot(tx2 + 2, tz2 + 40) > 2.6) tree(tx2, tz2, 0.7 + Math.random() * 0.5);
+  }
+  const bronze = lambert(0x3a4138);
+  box(2.4, 1.5, 1.4, 0xb9ad97, -2, 0.85, -40); // pedestal
+  const hb = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.55, 1.6), bronze);
+  hb.position.set(-2, 2.2, -40);
+  hb.castShadow = true;
+  const neckW = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.6, 0.34), bronze);
+  neckW.position.set(-2, 2.62, -39.4);
+  neckW.rotation.x = 0.5;
+  const headW = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.24, 0.5), bronze);
+  headW.position.set(-2, 2.85, -39.15);
+  scene.add(hb, neckW, headW);
+  for (const [lx2, lz2] of [[-2.16, -40.6], [-1.84, -40.6], [-2.16, -39.5], [-1.84, -39.5]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.65, 0.1), bronze);
+    leg.position.set(lx2, 1.85, lz2);
+    scene.add(leg);
+  }
+  const rider = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.75, 7), bronze);
+  rider.position.set(-2, 2.85, -40.25);
+  const riderHead = new THREE.Mesh(new THREE.SphereGeometry(0.13, 7, 6), bronze);
+  riderHead.position.set(-2, 3.35, -40.25);
+  scene.add(rider, riderHead);
+  addCollider(-2, -40, 2.4, 1.4);
+  landmarkLabel('Union Square', -2, 6.5, -40);
+}
+
+// The Fifth Avenue Hotel (1859), white marble, facing Madison Square.
+{
+  const hx = -17, hz = -76;
+  const hotel = box(7, 12, 5, 0xe8e0cd, hx, 6, hz);
+  hotel.castShadow = true;
+  box(7.4, 0.6, 5.4, 0xcdc4ab, hx, 12.3, hz);
+  box(7, 0.4, 5.2, 0xb9ad97, hx, 3, hz);   // beltcourse
+  box(7.2, 3, 5.2, 0xd5ccb6, hx, 1.5, hz); // arcaded base
+  const flag = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.6, 5), lambert(0x33302c));
+  flag.position.set(hx + 2.6, 13.8, hz + 1.8);
+  scene.add(flag);
+  addCollider(hx, hz, 7, 5);
+  occluders.push(hotel);
+  landmarkLabel('Fifth Avenue Hotel · 1859', hx, 16.5, hz);
+}
+
+// Labels for the landmarks that were already on the island.
+landmarkLabel('Trinity Church · 1846', -15, 28, 40);
+landmarkLabel('Brooklyn Bridge · 1883', 40, 26, 51);
+landmarkLabel('Castle Garden', -8, 7.5, 91);
+landmarkLabel('Madison Square Garden · 1890', 2, 41, -84);
+landmarkLabel('The World Building · 1890', 8, 35.5, 34);
+
 // Merge and add the city.
 const trimMat = lambert(0x4a4039);
 const tankMat = lambert(0x8a6f4d);
@@ -1568,6 +1822,21 @@ function openCard(marker) {
   document.getElementById('card-num').textContent = s.num;
   document.getElementById('card-title').textContent = s.title;
   document.getElementById('card-dates').textContent = s.dates;
+  const mediaEl = document.getElementById('card-media');
+  mediaEl.innerHTML = '';
+  if (s.image) {
+    const fig = document.createElement('figure');
+    fig.className = 'card-figure';
+    const img = document.createElement('img');
+    img.src = s.image.src;
+    img.alt = s.image.alt;
+    img.loading = 'lazy';
+    img.onerror = () => fig.remove();
+    const cap = document.createElement('figcaption');
+    cap.textContent = s.image.caption.replace(/\s+/g, ' ').trim();
+    fig.append(img, cap);
+    mediaEl.appendChild(fig);
+  }
   document.getElementById('card-body').innerHTML = s.body.map((p) => `<p>${p}</p>`).join('');
   document.getElementById('card-artifact').innerHTML = marker.visited
     ? `<b>Collected:</b> ${s.artifact}`
@@ -1777,6 +2046,22 @@ function animate() {
     beacon.position.set(player.position.x, 0, player.position.z);
     beaconCone.position.y = 7 + Math.sin(t * 2.4) * 0.7;
     beaconCone.rotation.y = t;
+  }
+
+  // --- landmark labels: always legible from the chart, discreet on foot ---
+  for (const L of landmarkLabels) {
+    let o, s;
+    if (chartView) {
+      o = 0.95;
+      s = 2.6;
+    } else {
+      const d = Math.hypot(player.position.x - L.x, player.position.z - L.z);
+      o = d < 18 ? 1 : d > 34 ? 0 : 1 - (d - 18) / 16;
+      s = 1;
+    }
+    L.sprite.material.opacity = o;
+    L.sprite.visible = o > 0.02;
+    if (L.sprite.visible) L.sprite.scale.set(13 * s, 2.03 * s, 1);
   }
 
   // --- street life ---

@@ -24,13 +24,17 @@ Own,"* The New York Times, January 19, 1982):
 ## Playing
 
 - **W A S D** / arrow keys to walk; **E** or the on-screen button to visit a site
-- On touch screens, drag anywhere to walk
+- **Drag** (mouse, or right thumb on touch screens) to look around; left thumb is the walk joystick
+- **M** (or the Chart View button) toggles a bird's-eye view of the whole island, in the spirit of the original 1982 map
 - The compass points to the nearest uncharted site; the Chart Key tracks progress
 
 ## Tech
 
 - [Three.js](https://threejs.org/) (r160, loaded from CDN via an import map)
 - Vanilla JS/HTML/CSS — **no build step, no dependencies to install**
+- The 1890 streetscape is procedural: brownstone/brick/cast-iron facades with
+  per-window variation are drawn to canvas textures (with bump maps) at load
+  time, and the whole city is merged into a handful of meshes for performance
 
 ## Run locally
 

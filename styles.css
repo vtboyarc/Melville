@@ -188,6 +188,15 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   justify-content: center;
   transform: translateY(2px);
 }
+.key-note {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--ink-soft);
+  font-style: italic;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--ink-soft);
+}
 #key-list li.done { color: var(--ink); }
 #key-list li.done .knum { background: var(--ink); }
 #key-list li.done::after { content: '✓'; margin-left: auto; color: var(--red); font-weight: 600; }

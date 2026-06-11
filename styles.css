@@ -188,6 +188,15 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   justify-content: center;
   transform: translateY(2px);
 }
+.key-note {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--ink-soft);
+  font-style: italic;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--ink-soft);
+}
 #key-list li.done { color: var(--ink); }
 #key-list li.done .knum { background: var(--ink); }
 #key-list li.done::after { content: '✓'; margin-left: auto; color: var(--red); font-weight: 600; }
@@ -203,20 +212,9 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   background: rgba(239, 230, 208, 0.9);
   box-shadow: 2px 2px 0 rgba(43, 38, 32, 0.25);
 }
-#compass-dial {
-  position: absolute;
-  inset: 0;
-  font-size: 10px;
-  color: var(--ink-soft);
-  text-align: center;
-  line-height: 1;
-  padding-top: 3px;
-  transition: transform 0.15s linear;
-}
 #compass-arrow {
   position: absolute;
   inset: 0;
-  transition: transform 0.2s linear;
 }
 #compass-arrow::before {
   content: '';
@@ -287,7 +285,7 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   background: var(--parchment);
   border: 2px solid var(--ink);
   box-shadow: 6px 6px 0 rgba(43, 38, 32, 0.4);
-  padding: 34px 32px 28px;
+  padding: 20px 32px 28px;
   text-align: center;
   animation: fadein 0.35s ease;
 }
@@ -295,7 +293,7 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
 .card-seal {
   width: 44px;
   height: 44px;
-  margin: -56px auto 10px;
+  margin: 0 auto 12px;
   border-radius: 50%;
   background: var(--red);
   border: 3px solid var(--parchment);
@@ -317,6 +315,27 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
 }
 
 .dates { font-style: italic; color: var(--ink-soft); margin-top: 4px; font-size: 16px; }
+
+.card-figure {
+  margin: 16px auto 0;
+  max-width: 420px;
+}
+.card-figure img {
+  display: block;
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border: 1.5px solid var(--ink);
+  box-shadow: 3px 3px 0 rgba(43, 38, 32, 0.25);
+  background: #fff;
+}
+.card-figure figcaption {
+  margin-top: 7px;
+  font-style: italic;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
 
 #card-body, #epilogue-body {
   margin-top: 16px;

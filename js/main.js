@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { SITES, EPILOGUE } from './sites.js';
 
 /* ============================================================
@@ -50,12 +51,19 @@ for (let z = 12; z >= -104; z -= 8) STREETS.push(z);
 const EL_X = 30; // Third Avenue El runs along x = 30, z in [-109, 0]
 
 const CLEAR_CIRCLES = SITES.map((s) => ({ x: s.pos.x, z: s.pos.z, r: 8.5 }));
-CLEAR_CIRCLES.push({ x: 18, z: -84, r: 5.5 });  // the house itself
-CLEAR_CIRCLES.push({ x: -8, z: 91, r: 6 });     // Castle Garden
-CLEAR_CIRCLES.push({ x: 19, z: 46, r: 7 });     // bridge approach
+CLEAR_CIRCLES.push({ x: 18, z: -84, r: 5.5 });   // the house itself
+CLEAR_CIRCLES.push({ x: -8, z: 91, r: 6 });      // Castle Garden
+CLEAR_CIRCLES.push({ x: 19, z: 46, r: 7 });      // bridge approach
+CLEAR_CIRCLES.push({ x: 2, z: 48, r: 10 });      // City Hall and its park
+CLEAR_CIRCLES.push({ x: -2, z: 38.8, r: 6.5 });  // Federal Hall
+CLEAR_CIRCLES.push({ x: 12.5, z: 44, r: 5 });    // Tribune Building
+CLEAR_CIRCLES.push({ x: -1.5, z: 57, r: 5 });    // Western Union Building
+CLEAR_CIRCLES.push({ x: 19, z: -4, r: 6 });      // Cooper Union
+CLEAR_CIRCLES.push({ x: -17, z: -76, r: 7 });    // Fifth Avenue Hotel
 const CLEAR_RECTS = [
   { x0: -15, x1: 7, z0: -93, z1: -80 },   // Madison Square Garden block
   { x0: -12, x1: 10, z0: -80, z1: -68 },  // Madison Square Park
+  { x0: -11, x1: 7, z0: -45, z1: -35 },   // Union Square
 ];
 
 const DOWNTOWN_PATHS = [
@@ -95,14 +103,23 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xe0d7be, 130, 320);
 const FOG_VIEWS = { street: { near: 130, far: 320 }, chart: { near: 600, far: 1300 } };
 
+// Image-based environment so window glass and water pick up reflections.
+try {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
+} catch {
+  // reflections are a nicety; the scene works without them
+}
+
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.4, 1400);
 // Third-person follow camera: orbits the player, drag to look around.
 // 'chart' view lifts it high over the island like the old map.
-const cam = { yaw: 0, height: 5, dist: 11, lastDrag: -10 };
-// Chart-view vantage chosen so the full island (z ≈ 96 to -112, x ≈ ±58)
-// fits the 55° frustum even on a portrait phone.
-const CHART_CAM_POS = new THREE.Vector3(0, 205, 95);
-const CHART_LOOK_AT = new THREE.Vector3(0, 0, -12);
+const cam = { yaw: 0, height: 5, dist: 11, smoothDist: 11, lastDrag: -10 };
+// Chart-view vantage chosen so the full island plus the harbor landmarks
+// (z ≈ 122 to -112, x ≈ ±58) fit the 55° frustum even on a portrait phone.
+const CHART_CAM_POS = new THREE.Vector3(0, 215, 120);
+const CHART_LOOK_AT = new THREE.Vector3(0, 0, 10);
 const lookTarget = new THREE.Vector3(0, 1.7, 70); // smoothed camera focus
 const occluders = []; // meshes the camera should not clip through
 
@@ -118,9 +135,22 @@ sun.shadow.camera.top = 140;
 sun.shadow.camera.bottom = -140;
 sun.shadow.camera.far = 400;
 sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.03;
 sun.shadow.radius = 3;
 scene.add(sun);
 scene.add(sun.target);
+
+// Tight shadow frustum at street level for crisp shadows; wide in chart view.
+function applyShadowFrustum(view) {
+  const c = sun.shadow.camera;
+  if (view === 'chart') {
+    c.left = -100; c.right = 100; c.top = 140; c.bottom = -140;
+  } else {
+    c.left = -55; c.right = 55; c.top = 75; c.bottom = -75;
+  }
+  c.updateProjectionMatrix();
+}
+applyShadowFrustum('street');
 
 const colliders = []; // axis-aligned boxes {x0,x1,z0,z1}
 
@@ -249,12 +279,18 @@ function makeNumberSprite(n) {
 
 /* ---------------- water & land ---------------- */
 
-const waterGeo = new THREE.PlaneGeometry(440, 500, 44, 50);
+const waterGeo = new THREE.PlaneGeometry(440, 500, 60, 68);
 waterGeo.rotateX(-Math.PI / 2);
 const waterBase = waterGeo.attributes.position.array.slice();
 const water = new THREE.Mesh(
   waterGeo,
-  new THREE.MeshPhongMaterial({ color: COLORS.water, shininess: 70, flatShading: true })
+  new THREE.MeshStandardMaterial({
+    color: 0x86aca8,
+    roughness: 0.32,
+    metalness: 0.08,
+    flatShading: true,
+    envMapIntensity: 1.1,
+  })
 );
 water.position.set(0, -0.55, -8);
 water.receiveShadow = true;
@@ -434,11 +470,16 @@ function makeFacadeMaps(p) {
   const bv = document.createElement('canvas'); // bump/height map
   bv.width = CW; bv.height = CH;
   const btx = bv.getContext('2d');
+  const rv = document.createElement('canvas'); // G = roughness, B = metalness
+  rv.width = CW; rv.height = CH;
+  const rtx = rv.getContext('2d');
 
   ctx.fillStyle = p.wall;
   ctx.fillRect(0, 0, CW, CH);
   btx.fillStyle = '#7f7f7f';
   btx.fillRect(0, 0, CW, CH);
+  rtx.fillStyle = 'rgb(0,235,0)'; // masonry: rough, non-metal
+  rtx.fillRect(0, 0, CW, CH);
 
   if (p.style === 'brick') {
     // individual bricks vary in tone
@@ -528,10 +569,15 @@ function makeFacadeMaps(p) {
       glass.addColorStop(1, `rgb(${50 + hue},${60 + hue},${72 + hue})`);
       ctx.fillStyle = glass;
       ctx.fillRect(wx, wy, wx2 - wx, wy2 - wy);
+      rtx.fillStyle = 'rgb(0,55,120)'; // glass: smooth, reflective
+      rtx.fillRect(wx, wy, wx2 - wx, wy2 - wy);
       const v = Math.random();
       if (v < 0.3) { // half-drawn shade
+        const drop = rnd(0.2, 0.55);
         ctx.fillStyle = '#cfc3a6';
-        ctx.fillRect(wx, wy, wx2 - wx, (wy2 - wy) * rnd(0.2, 0.55));
+        ctx.fillRect(wx, wy, wx2 - wx, (wy2 - wy) * drop);
+        rtx.fillStyle = 'rgb(0,215,8)';
+        rtx.fillRect(wx, wy, wx2 - wx, (wy2 - wy) * drop);
       } else if (v < 0.5) { // parted curtains
         ctx.fillStyle = 'rgba(222,214,192,0.85)';
         ctx.fillRect(wx, wy, (wx2 - wx) * 0.22, wy2 - wy);
@@ -571,7 +617,9 @@ function makeFacadeMaps(p) {
   map.anisotropy = 8;
   const bump = new THREE.CanvasTexture(bv);
   bump.wrapS = bump.wrapT = THREE.RepeatWrapping;
-  return { map, bump };
+  const rough = new THREE.CanvasTexture(rv);
+  rough.wrapS = rough.wrapT = THREE.RepeatWrapping;
+  return { map, bump, rough };
 }
 
 const FACADES = [
@@ -582,8 +630,17 @@ const FACADES = [
   { style: 'stone', wall: '#9b9183', joint: 'rgba(0,0,0,0.15)', trim: '#b3a995' },
 ];
 const facadeMats = FACADES.map((p) => {
-  const { map, bump } = makeFacadeMaps(p);
-  return new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: 0.5, roughness: 0.93, metalness: 0 });
+  const { map, bump, rough } = makeFacadeMaps(p);
+  return new THREE.MeshStandardMaterial({
+    map,
+    bumpMap: bump,
+    bumpScale: 0.5,
+    roughnessMap: rough,
+    metalnessMap: rough,
+    roughness: 1,
+    metalness: 1,
+    envMapIntensity: 1.15,
+  });
 });
 
 // Ground floors: paneled doors for the rowhouses, glazed shopfronts with
@@ -598,6 +655,11 @@ function makeGroundMaps(kind) {
   const btx = bv.getContext('2d');
   btx.fillStyle = '#7f7f7f';
   btx.fillRect(0, 0, CW, CH);
+  const rv = document.createElement('canvas'); // G = roughness, B = metalness
+  rv.width = CW; rv.height = CH;
+  const rtx = rv.getContext('2d');
+  rtx.fillStyle = 'rgb(0,235,0)';
+  rtx.fillRect(0, 0, CW, CH);
 
   if (kind === 'row') {
     ctx.fillStyle = '#6e5443'; // rusticated brownstone base
@@ -643,6 +705,8 @@ function makeGroundMaps(kind) {
         ctx.fillRect(ox + 38, 81, 52, 4);
         btx.fillStyle = '#2f2f2f';
         btx.fillRect(ox + 34, 28, 60, 110);
+        rtx.fillStyle = 'rgb(0,55,120)';
+        rtx.fillRect(ox + 38, 32, 52, 102);
       }
     }
   } else {
@@ -673,6 +737,8 @@ function makeGroundMaps(kind) {
       ctx.fillRect(ox + 10, 42, 108, 92);
       btx.fillStyle = '#2a2a2a';
       btx.fillRect(ox + 10, 42, 108, 92);
+      rtx.fillStyle = 'rgb(0,45,130)'; // plate glass: very reflective
+      rtx.fillRect(ox + 10, 42, 108, 92);
       if (b % 2 === 1) { // recessed shop door
         ctx.fillStyle = '#15110d';
         ctx.fillRect(ox + 48, 52, 32, 82);
@@ -696,7 +762,18 @@ function makeGroundMaps(kind) {
   map.anisotropy = 8;
   const bump = new THREE.CanvasTexture(bv);
   bump.wrapS = bump.wrapT = THREE.RepeatWrapping;
-  return new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: 0.5, roughness: 0.9, metalness: 0 });
+  const rough = new THREE.CanvasTexture(rv);
+  rough.wrapS = rough.wrapT = THREE.RepeatWrapping;
+  return new THREE.MeshStandardMaterial({
+    map,
+    bumpMap: bump,
+    bumpScale: 0.5,
+    roughnessMap: rough,
+    metalnessMap: rough,
+    roughness: 1,
+    metalness: 1,
+    envMapIntensity: 1.15,
+  });
 }
 const groundMats = { row: makeGroundMaps('row'), shop: makeGroundMaps('shop') };
 const groundGeos = { row: [], shop: [] };
@@ -906,6 +983,396 @@ for (const [cx, cz] of [[-26, -56], [16, -16]]) {
   occluders.push(body);
 }
 
+/* ---------------- landmarks of Melville's New York ----------------
+   Everything here stood within his lifetime (by September 1891). */
+
+const landmarkLabels = [];
+// `range` is how far away the name fades in on foot — harbor landmarks
+// are visible from the Battery, so theirs reach across the water.
+// Drawn at high resolution so chart view stays crisp.
+function landmarkLabel(text, x, y, z, range = 34) {
+  const cv = document.createElement('canvas');
+  const font = `500 84px 'EB Garamond', Georgia, serif`;
+  let ctx = cv.getContext('2d');
+  ctx.font = font;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '12px';
+  // size the canvas to the text (resizing resets context state)
+  const w = Math.ceil(Math.max(440, (ctx.measureText(text).width || 960) + 96));
+  cv.width = w;
+  cv.height = 160;
+  ctx = cv.getContext('2d');
+  ctx.font = font;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '12px';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 18;
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = 'rgba(239,230,208,0.85)';
+  ctx.strokeText(text, w / 2, 84);
+  ctx.fillStyle = 'rgba(43,38,32,0.95)';
+  ctx.fillText(text, w / 2, 84);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  sprite.renderOrder = 5;
+  sprite.position.set(x, y, z);
+  const sh = 2.03, sw = sh * (w / 160);
+  sprite.scale.set(sw, sh, 1);
+  scene.add(sprite);
+  landmarkLabels.push({ sprite, x, z, w: sw, h: sh, range });
+  return sprite;
+}
+
+// Every landmark is tappable — in the street or from the chart — and
+// opens a short history card. The label sprite and an invisible volume
+// around the structure both catch the tap.
+const tapTargets = [];
+function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 0, d = 8 } = {}) {
+  const sprite = landmarkLabel(year ? `${name} · ${year}` : name, x, labelY, z, range);
+  const info = { name, year, blurb };
+  sprite.userData.landmark = info;
+  tapTargets.push(sprite);
+  const hitH = h || labelY;
+  const hit = new THREE.Mesh(
+    new THREE.BoxGeometry(w, hitH, d),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+  );
+  hit.position.set(x, hitH / 2, z);
+  hit.userData.landmark = info;
+  scene.add(hit);
+  tapTargets.push(hit);
+}
+
+// The Statue of Liberty (1886) — five years old, her copper still brown.
+{
+  const lx = -34, lz = 107;
+  box(15, 1.6, 14, COLORS.outerLand, lx, -0.6, lz, scene, false); // Bedloe's Island
+  // the star-shaped ramparts of Fort Wood
+  const starPts = [];
+  for (let i = 0; i < 22; i++) {
+    const a = (i / 22) * Math.PI * 2;
+    const rad = i % 2 === 0 ? 6 : 4;
+    starPts.push(new THREE.Vector2(Math.cos(a) * rad, Math.sin(a) * rad));
+  }
+  const starGeo = new THREE.ExtrudeGeometry(new THREE.Shape(starPts), { depth: 2.2, bevelEnabled: false });
+  starGeo.rotateX(Math.PI / 2);
+  const star = new THREE.Mesh(starGeo, lambert(0xa39782));
+  star.position.set(lx, 2.2, lz);
+  star.castShadow = star.receiveShadow = true;
+  scene.add(star);
+  // stepped granite pedestal
+  box(5.4, 1.3, 5.4, 0xa89c85, lx, 2.85, lz);
+  const ped = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 3.1, 7.6, 4), lambert(0xb9ad97));
+  ped.rotation.y = Math.PI / 4;
+  ped.position.set(lx, 7.3, lz);
+  ped.castShadow = true;
+  scene.add(ped);
+  box(4.5, 0.7, 4.5, 0xcabfa6, lx, 11.4, lz); // cornice
+  box(3.2, 1.5, 3.2, 0xb3a78f, lx, 12.4, lz); // statue plinth
+
+  // Liberty Enlightening the World, facing southeast toward the Narrows
+  const fig = new THREE.Group();
+  const copper = new THREE.MeshStandardMaterial({ color: 0x7a5b46, roughness: 0.55, metalness: 0.35, envMapIntensity: 1.1 });
+  const gold = new THREE.MeshStandardMaterial({ color: COLORS.gold, roughness: 0.25, metalness: 0.85, emissive: 0x3a2c08 });
+  const part = (geo, x, y, z, rx = 0, rz = 0) => {
+    const m = new THREE.Mesh(geo, copper);
+    m.position.set(x, y, z);
+    m.rotation.x = rx;
+    m.rotation.z = rz;
+    m.castShadow = true;
+    fig.add(m);
+    return m;
+  };
+  part(new THREE.CylinderGeometry(1.55, 2.75, 7.4, 16), 0, 3.7, 0);              // flowing robe
+  part(new THREE.CylinderGeometry(1.7, 2.2, 2.2, 16), 0.18, 5.2, 0.2, 0.06, 0.05); // drape fold
+  part(new THREE.CylinderGeometry(1.0, 1.6, 4.0, 14), 0, 9.2, 0);                // torso
+  const shoulders = part(new THREE.SphereGeometry(1.12, 12, 10), 0, 11.15, 0);
+  shoulders.scale.set(1.35, 0.75, 0.85);
+  part(new THREE.SphereGeometry(0.78, 12, 10), 0, 12.45, 0);                     // head
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.1, 8, 16), copper); // diadem band
+  band.position.set(0, 12.8, 0);
+  band.rotation.x = Math.PI / 2.4;
+  fig.add(band);
+  for (let i = 0; i < 7; i++) { // crown rays fanned ear to ear
+    const a = (i / 6) * Math.PI;
+    const ray = part(new THREE.ConeGeometry(0.13, 1.35, 6), Math.cos(a) * 0.95, 12.9 + Math.sin(a) * 0.8, -0.1);
+    ray.rotation.z = a - Math.PI / 2;
+  }
+  // left arm cradling the tablet — JULY IV MDCCLXXVI
+  part(new THREE.CylinderGeometry(0.3, 0.42, 2.6, 8), -1.15, 10.3, 0.5, 0.35, 0.8);
+  const tablet = part(new THREE.BoxGeometry(1.15, 2.0, 0.34), -1.5, 10.6, 0.75, 0.18, 0.22);
+  tablet.castShadow = true;
+  // raised right arm with flared sleeve, torch, and gilded flame
+  part(new THREE.ConeGeometry(0.85, 1.9, 10), 1.15, 11.7, 0.15, 0, -0.33);       // sleeve flares from the shoulder
+  part(new THREE.CylinderGeometry(0.26, 0.4, 4.6, 10), 1.75, 13.3, 0.25, 0.05, -0.33); // arm
+  part(new THREE.CylinderGeometry(0.13, 0.17, 1.4, 8), 2.5, 15.9, 0.35);         // torch handle
+  const balcony = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.09, 8, 14), copper);
+  balcony.position.set(2.5, 16.5, 0.35);
+  balcony.rotation.x = Math.PI / 2;
+  fig.add(balcony);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.5, 9), gold);
+  flame.position.set(2.5, 17.5, 0.35);
+  flame.castShadow = true;
+  fig.add(flame);
+  fig.position.set(lx, 13.15, lz);
+  fig.rotation.y = Math.PI / 4; // facing the harbor mouth
+  scene.add(fig);
+  landmarkInfo('Statue of Liberty', 1886,
+    `Bartholdi's colossus was dedicated on October 28, 1886, when Melville was
+     67 — in his day her copper still gleamed brown, not green; the patina came
+     decades later. The old sailor's harbor of square-riggers now had a new
+     light at its gate.`,
+    lx, lz, 33.5, { range: 70, w: 12, h: 31, d: 12 });
+}
+
+// Governors Island with round Castle Williams (1811).
+{
+  box(13, 1.6, 8, COLORS.outerLand, 33, -0.6, 106, scene, false);
+  const fort = new THREE.Mesh(new THREE.CylinderGeometry(4, 4.3, 4.2, 16), lambert(0xb08d6e));
+  fort.position.set(31, 2.3, 105);
+  fort.castShadow = true;
+  scene.add(fort);
+  landmarkInfo('Governors Island', 1811,
+    `Round Castle Williams (1811) guarded the harbor from Governors Island,
+     an army post throughout Melville's lifetime, across the Buttermilk
+     Channel from Brooklyn. With Castle Clinton at the Battery it formed the
+     harbor's old stone defenses.`,
+    33, 106, 10, { range: 58, w: 13, h: 8, d: 8 });
+}
+
+// City Hall (1812) in its park.
+{
+  const geo = new THREE.CircleGeometry(4.5, 18);
+  geo.rotateX(-Math.PI / 2);
+  const green = new THREE.Mesh(geo, lambert(COLORS.park));
+  green.receiveShadow = true;
+  green.position.set(2, 0.1, 44);
+  scene.add(green);
+  tree(-1, 43, 0.8);
+  tree(5, 45, 0.9);
+  const hall = box(10, 10, 6, 0xded6c2, 2, 5, 52);
+  hall.castShadow = true;
+  box(10.6, 0.6, 6.6, 0xc7bda5, 2, 10.3, 52);
+  box(3.6, 3, 3.6, 0xded6c2, 2, 11.8, 52); // attic pavilion
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 2.2, 10), lambert(0xd5ccb6));
+  drum.position.set(2, 14.4, 52);
+  const cupola = new THREE.Mesh(new THREE.SphereGeometry(1.3, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), lambert(0xb3a479));
+  cupola.position.set(2, 15.5, 52);
+  scene.add(drum, cupola);
+  addCollider(2, 52, 10, 6);
+  occluders.push(hall);
+  landmarkInfo('City Hall', 1812,
+    `The marble French-Renaissance City Hall opened in 1812, seven years
+     before Melville was born around the corner on Pearl Street. In 1865
+     Lincoln lay in state under its rotunda while the city he had carried
+     filed past.`,
+    2, 52, 19, { w: 10, h: 17, d: 6 });
+}
+
+// Federal Hall (1842), Washington's statue (1883) on its steps.
+{
+  const fx = -2, fz = 38.8;
+  box(8, 1.8, 6.4, 0xcfc8b4, fx, 0.9, fz);                 // plinth
+  box(8.4, 1.2, 2.2, 0xc2bba6, fx, 0.6, fz + 3.9);         // steps
+  const cella = box(7.6, 5.6, 4.4, 0xcfc8b4, fx, 4.6, fz - 0.8);
+  cella.castShadow = true;
+  for (let i = -2; i <= 2; i++) {
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 5, 8), lambert(0xd8d1bd));
+    col.position.set(fx + i * 1.5, 4.3, fz + 1.7);
+    col.castShadow = true;
+    scene.add(col);
+  }
+  const ped = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.25, 2.2, 4), lambert(0xcfc8b4));
+  ped.rotation.y = Math.PI / 4;
+  ped.position.set(fx, 2.9, fz + 4);
+  const gw = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.48, 2.1, 7), lambert(0x3a4138));
+  gw.position.set(fx, 5.05, fz + 4);
+  const gwHead = new THREE.Mesh(new THREE.SphereGeometry(0.29, 8, 6), lambert(0x3a4138));
+  gwHead.position.set(fx, 6.35, fz + 4);
+  scene.add(ped, gw, gwHead);
+  // pediment
+  const shape = new THREE.Shape([
+    new THREE.Vector2(-4.1, 0), new THREE.Vector2(4.1, 0), new THREE.Vector2(0, 1.9),
+  ]);
+  const pedi = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 1.3, bevelEnabled: false }), lambert(0xd8d1bd));
+  pedi.position.set(fx, 6.8, fz + 0.6);
+  pedi.castShadow = true;
+  scene.add(pedi);
+  addCollider(fx, fz, 8, 6.4);
+  occluders.push(cella);
+  landmarkInfo('Federal Hall', 1842,
+    `On this Wall Street corner Washington took the first presidential oath
+     in 1789; J. Q. A. Ward's bronze of him was set on the steps in 1883.
+     The Greek Revival building itself served as the Custom House until
+     1862 — the very service in which Melville later spent nineteen years —
+     and then as the Sub-Treasury, its vaults full of gold.`,
+    fx, fz, 12, { w: 8.4, h: 9.5, d: 7 });
+}
+
+// The Tribune Building (1875) — tall brick, clock tower over Park Row.
+{
+  const tx = 12.5, tz = 44;
+  const tower = box(5, 18, 5, 0x7e4034, tx, 9, tz);
+  tower.castShadow = true;
+  box(5.5, 0.6, 5.5, 0x5e3026, tx, 18.3, tz);
+  const upper = box(2.8, 7, 2.8, 0x7e4034, tx, 22.1, tz);
+  upper.castShadow = true;
+  const clock = new THREE.Mesh(new THREE.CircleGeometry(0.7, 14), new THREE.MeshBasicMaterial({ color: 0xefe6d0 }));
+  clock.position.set(tx, 23.8, tz + 1.42);
+  scene.add(clock);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(2.2, 3.2, 4), lambert(0x4a3a30));
+  cap.rotation.y = Math.PI / 4;
+  cap.position.set(tx, 27.2, tz);
+  cap.castShadow = true;
+  scene.add(cap);
+  addCollider(tx, tz, 5, 5);
+  occluders.push(tower);
+  landmarkInfo('Tribune Building', 1875,
+    `Richard Morris Hunt's brick clock tower for Horace Greeley's New-York
+     Tribune was one of the first elevator towers in the world — at 260 feet
+     it loomed over Newspaper Row, where every great daily watched City Hall
+     across the park.`,
+    tx, tz, 31, { w: 5.5, h: 29, d: 5.5 });
+}
+
+// The Western Union Telegraph Building (1875) on lower Broadway.
+{
+  const wx = -1.5, wz = 57;
+  const main = box(5.5, 15, 5, 0x6d5b4d, wx, 7.5, wz);
+  main.castShadow = true;
+  box(6, 0.6, 5.5, 0x53453a, wx, 15.3, wz);
+  const mansard = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.2, 3.4, 4), lambert(0x3f3630));
+  mansard.rotation.y = Math.PI / 4;
+  mansard.position.set(wx, 17.3, wz);
+  mansard.castShadow = true;
+  scene.add(mansard);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.6, 5), lambert(0x33302c));
+  pole.position.set(wx, 20.8, wz);
+  scene.add(pole);
+  addCollider(wx, wz, 5.5, 5);
+  occluders.push(main);
+  landmarkInfo('Western Union Building', 1875,
+    `George B. Post's ten-storey telegraph palace on Broadway was, with the
+     Tribune, the city's first true skyscraper. Every day at noon a time-ball
+     dropped from its mast so the harbor's ships — and the customs men on
+     the piers — could set their chronometers.`,
+    wx, wz, 24.5, { w: 6, h: 22, d: 5.5 });
+}
+
+// Cooper Union (1859), in whose Great Hall Lincoln spoke in 1860.
+{
+  const cx = 19, cz = -4;
+  const block = box(6, 11, 8, 0x6a4a39, cx, 5.5, cz);
+  block.castShadow = true;
+  box(6.5, 0.7, 8.5, 0x52382b, cx, 11.35, cz);
+  for (let i = -1; i <= 1; i++) { // round-arched bays hinted with piers
+    box(0.6, 9.5, 0.35, 0x7d5a46, cx + i * 2, 4.75, cz + 4.05, scene, false);
+  }
+  addCollider(cx, cz, 6, 8);
+  occluders.push(block);
+  landmarkInfo('Cooper Union', 1859,
+    `Peter Cooper's free college of art and science, brownstone over an
+     iron frame. In its Great Hall in February 1860 an Illinois lawyer named
+     Lincoln gave the speech — “right makes might” — that carried him toward
+     the presidency.`,
+    cx, cz, 15.5, { w: 6.5, h: 12.5, d: 8.5 });
+}
+
+// Union Square (1839), with the equestrian Washington of 1856.
+{
+  const geo = new THREE.PlaneGeometry(16, 9);
+  geo.rotateX(-Math.PI / 2);
+  const green = new THREE.Mesh(geo, lambert(COLORS.park));
+  green.receiveShadow = true;
+  green.position.set(-2, 0.1, -40);
+  scene.add(green);
+  for (let i = 0; i < 7; i++) {
+    const tx2 = -9 + Math.random() * 14, tz2 = -43.6 + Math.random() * 7.2;
+    if (Math.hypot(tx2 + 2, tz2 + 40) > 2.6) tree(tx2, tz2, 0.7 + Math.random() * 0.5);
+  }
+  const bronze = lambert(0x3a4138);
+  box(3, 2.2, 2, 0xb9ad97, -2, 1.2, -40); // pedestal
+  const hb = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.8, 2.3), bronze);
+  hb.position.set(-2, 3.1, -40);
+  hb.castShadow = true;
+  const neckW = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.85, 0.48), bronze);
+  neckW.position.set(-2, 3.7, -39.15);
+  neckW.rotation.x = 0.5;
+  const headW = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.34, 0.7), bronze);
+  headW.position.set(-2, 4.05, -38.8);
+  scene.add(hb, neckW, headW);
+  for (const [lx2, lz2] of [[-2.24, -40.85], [-1.76, -40.85], [-2.24, -39.3], [-1.76, -39.3]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.95, 0.14), bronze);
+    leg.position.set(lx2, 2.65, lz2);
+    scene.add(leg);
+  }
+  const rider = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.3, 1.05, 7), bronze);
+  rider.position.set(-2, 4.0, -40.35);
+  const riderHead = new THREE.Mesh(new THREE.SphereGeometry(0.18, 7, 6), bronze);
+  riderHead.position.set(-2, 4.7, -40.35);
+  scene.add(rider, riderHead);
+  addCollider(-2, -40, 3, 2);
+  landmarkInfo('Union Square', 1839,
+    `The first of the great squares on Melville's walks uptown. Henry Kirke
+     Brown's equestrian Washington (1856) — the city's oldest outdoor
+     statue — marks where New Yorkers met the general on Evacuation Day,
+     1783.`,
+    -2, -40, 9, { w: 6, h: 6.5, d: 5 });
+}
+
+// The Fifth Avenue Hotel (1859), white marble, facing Madison Square.
+{
+  const hx = -17, hz = -76;
+  const hotel = box(7, 16, 5.5, 0xe8e0cd, hx, 8, hz);
+  hotel.castShadow = true;
+  box(7.5, 0.7, 6, 0xcdc4ab, hx, 16.35, hz);
+  box(7.1, 0.4, 5.7, 0xb9ad97, hx, 3.4, hz);   // beltcourse
+  box(7.2, 3.4, 5.7, 0xd5ccb6, hx, 1.7, hz);   // arcaded base
+  const flag = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3, 5), lambert(0x33302c));
+  flag.position.set(hx + 2.6, 18.2, hz + 1.8);
+  scene.add(flag);
+  addCollider(hx, hz, 7, 5.5);
+  occluders.push(hotel);
+  landmarkInfo('Fifth Avenue Hotel', 1859,
+    `Amos Eno's white-marble palace on Madison Square — mocked as “Eno's
+     Folly,” then the most celebrated hotel in America, with the first
+     passenger elevator in any hotel. Princes, presidents, and the
+     Republican bosses of the Gilded Age held court a block from Melville's
+     front door.`,
+    hx, hz, 21, { w: 7.5, h: 18, d: 6 });
+}
+
+// Info for the landmarks that were already on the island.
+landmarkInfo('Trinity Church', 1846,
+  `Richard Upjohn's brownstone Gothic spire was the tallest thing in New
+   York for most of Melville's life — mariners steered by it, and its bells
+   rang over Wall Street. Alexander Hamilton lies in its churchyard.`,
+  -15, 40, 28, { w: 7, h: 26, d: 12 });
+landmarkInfo('Brooklyn Bridge', 1883,
+  `The Roeblings' “eighth wonder” opened in May 1883, its towers taller
+   than anything but Trinity's spire. The old sailor saw the age of sail
+   framed in steel cable — ships passed beneath a roadway in the sky.`,
+  40, 51, 27, { w: 44, h: 24, d: 10 });
+landmarkInfo('Castle Garden', null,
+  `Built as a fort before the War of 1812, then the concert hall where all
+   New York heard Jenny Lind in 1850 — Melville's brother got him a ticket
+   line — and from 1855 to 1890 the landing depot where eight million
+   immigrants first touched America.`,
+  -8, 91, 9.5, { w: 9, h: 7, d: 9 });
+landmarkInfo('Madison Square Garden', 1890,
+  `Stanford White's colossal amphitheater of yellow brick and terra cotta
+   opened in 1890, its arcaded tower the second-tallest thing in the city.
+   Saint-Gaudens's gilded Diana was hoisted to its top in 1891 — see site
+   No. 5 for her story.`,
+  2, -84, 41, { w: 14, h: 37, d: 12 });
+landmarkInfo('The World Building', 1890,
+  `Joseph Pulitzer's gold-domed tower on Park Row — at 309 feet the
+   tallest building on earth when it opened in 1890, the year before
+   Melville died. From its dome you could see forty miles of the harbor
+   he had sailed out of as a boy.`,
+  8, 34, 35.5, { w: 6, h: 33, d: 6 });
+
 // Merge and add the city.
 const trimMat = lambert(0x4a4039);
 const tankMat = lambert(0x8a6f4d);
@@ -1106,11 +1573,11 @@ function tree(x, z, s = 1) {
 }
 // Castle Garden
 {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.6, 3.4, 14), lambert(COLORS.stone));
-  m.position.set(-8, 1.7, 91);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.5, 5, 14), lambert(COLORS.stone));
+  m.position.set(-8, 2.5, 91);
   m.castShadow = m.receiveShadow = true;
   scene.add(m);
-  addCollider(-8, 91, 7, 7);
+  addCollider(-8, 91, 8.5, 8.5);
   occluders.push(m);
 }
 
@@ -1317,7 +1784,7 @@ sailShip(-53, -20, 0.9);            // moored at the customs pier
 sailShip(52.5, -88, 0.85);          // moored at the East River pier
 const driftA = sailShip(-62, 70, 1, Math.PI);    // beating up the Hudson
 const driftB = steamShip(40.5, 55, Math.PI);     // steaming up the East River
-const driftC = steamShip(-60, 112, Math.PI / 2); // harbor ferry
+const driftC = steamShip(-60, 98, Math.PI / 2); // harbor ferry, hugging the Battery
 
 // The whale, off the Battery. Of course there is a whale.
 let whale, spout;
@@ -1453,7 +1920,7 @@ window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 // Touch: left side of the screen is a walk joystick, everywhere else
 // (and the mouse on desktop) drags the camera around the player.
 const joy = { id: null, ox: 0, oy: 0, dx: 0, dy: 0 };
-const look = { id: null, lx: 0, ly: 0 };
+const look = { id: null, lx: 0, ly: 0, sx: 0, sy: 0 };
 const joyEl = document.getElementById('joystick');
 const stickEl = document.getElementById('stick');
 
@@ -1477,6 +1944,8 @@ window.addEventListener('pointerdown', (e) => {
     look.id = e.pointerId;
     look.lx = e.clientX;
     look.ly = e.clientY;
+    look.sx = e.clientX; // remembered so a motionless release counts as a tap
+    look.sy = e.clientY;
   }
 });
 window.addEventListener('pointermove', (e) => {
@@ -1489,7 +1958,7 @@ window.addEventListener('pointermove', (e) => {
     stickEl.style.transform = `translate(${(dx / len) * cl}px, ${(dy / len) * cl}px)`;
   } else if (e.pointerId === look.id && state.view === 'street') {
     cam.yaw -= (e.clientX - look.lx) * 0.0055;
-    cam.height = Math.min(13, Math.max(2.4, cam.height + (e.clientY - look.ly) * 0.035));
+    cam.height = Math.min(13, Math.max(1.5, cam.height + (e.clientY - look.ly) * 0.035));
     look.lx = e.clientX;
     look.ly = e.clientY;
     cam.lastDrag = clock.elapsedTime;
@@ -1500,8 +1969,13 @@ function endPointer(e) {
     joy.id = null;
     joy.dx = joy.dy = 0;
     joyEl.classList.add('hidden');
+    // a motionless touch in the walk zone is a tap, not a walk
+    if (Math.hypot(e.clientX - joy.ox, e.clientY - joy.oy) < 8) handleTap(e.clientX, e.clientY);
   }
-  if (e.pointerId === look.id) look.id = null;
+  if (e.pointerId === look.id) {
+    look.id = null;
+    if (Math.hypot(e.clientX - look.sx, e.clientY - look.sy) < 8) handleTap(e.clientX, e.clientY);
+  }
 }
 window.addEventListener('pointerup', endPointer);
 window.addEventListener('pointercancel', endPointer);
@@ -1519,12 +1993,12 @@ const cardEl = document.getElementById('card');
 const epilogueEl = document.getElementById('epilogue');
 const progressEl = document.getElementById('progress');
 const compassArrow = document.getElementById('compass-arrow');
-const compassDial = document.getElementById('compass-dial');
 
 const viewBtn = document.getElementById('view-btn');
 function toggleView() {
   state.view = state.view === 'street' ? 'chart' : 'street';
   viewBtn.textContent = state.view === 'street' ? 'Chart View' : 'Street View';
+  applyShadowFrustum(state.view);
 }
 viewBtn.addEventListener('click', toggleView);
 
@@ -1562,14 +2036,63 @@ function tryVisit() {
 }
 visitBtn.addEventListener('click', tryVisit);
 
+// Tap a red site pin or any landmark — on foot or from the chart — to read about it.
+const tapRay = new THREE.Raycaster();
+function handleTap(cx, cy) {
+  if (!state.started || state.modal) return;
+  tapRay.setFromCamera(
+    new THREE.Vector2((cx / window.innerWidth) * 2 - 1, -(cy / window.innerHeight) * 2 + 1),
+    camera
+  );
+  for (const m of markers) {
+    if (tapRay.intersectObject(m.g, true).length) {
+      openCard(m);
+      return;
+    }
+  }
+  const hits = tapRay.intersectObjects(tapTargets, false);
+  if (hits.length) openLandmarkCard(hits[0].object.userData.landmark);
+}
+
+function openLandmarkCard(info) {
+  if (!info) return;
+  state.modal = true;
+  document.getElementById('card-num').textContent = '★';
+  document.getElementById('card-title').textContent = info.name;
+  document.getElementById('card-dates').textContent = info.year
+    ? `${info.year} · a landmark of Melville’s city`
+    : 'a landmark of Melville’s city';
+  document.getElementById('card-media').innerHTML = '';
+  document.getElementById('card-body').innerHTML = `<p>${info.blurb}</p>`;
+  document.getElementById('card-artifact').style.display = 'none';
+  cardEl.classList.remove('hidden');
+}
+
 function openCard(marker) {
   state.modal = true;
   const s = marker.site;
   document.getElementById('card-num').textContent = s.num;
   document.getElementById('card-title').textContent = s.title;
   document.getElementById('card-dates').textContent = s.dates;
+  const mediaEl = document.getElementById('card-media');
+  mediaEl.innerHTML = '';
+  if (s.image) {
+    const fig = document.createElement('figure');
+    fig.className = 'card-figure';
+    const img = document.createElement('img');
+    img.src = s.image.src;
+    img.alt = s.image.alt;
+    img.loading = 'lazy';
+    img.onerror = () => fig.remove();
+    const cap = document.createElement('figcaption');
+    cap.textContent = s.image.caption.replace(/\s+/g, ' ').trim();
+    fig.append(img, cap);
+    mediaEl.appendChild(fig);
+  }
   document.getElementById('card-body').innerHTML = s.body.map((p) => `<p>${p}</p>`).join('');
-  document.getElementById('card-artifact').innerHTML = marker.visited
+  const artifactEl = document.getElementById('card-artifact');
+  artifactEl.style.display = '';
+  artifactEl.innerHTML = marker.visited
     ? `<b>Collected:</b> ${s.artifact}`
     : `<b>Artifact found:</b> ${s.artifact}`;
   cardEl.classList.remove('hidden');
@@ -1606,6 +2129,7 @@ document.getElementById('epilogue-close').addEventListener('click', () => {
 /* ---------------- movement & loop ---------------- */
 
 const SPEED = 7.5;
+let needleAngle = 0; // continuous compass-needle angle, radians
 let walkPhase = 0;
 const clock = new THREE.Clock();
 const camRay = new THREE.Raycaster();
@@ -1700,9 +2224,15 @@ function animate() {
     camRay.set(head, toCam);
     camRay.far = fullDist;
     const blocked = camRay.intersectObjects(occluders, false);
-    const camDist = blocked.length ? Math.max(2.2, blocked[0].distance - 0.5) : fullDist;
-    camPos = head.clone().addScaledVector(toCam, camDist);
-    lookGoal = new THREE.Vector3(player.position.x, player.position.y + 1.7, player.position.z);
+    const targetDist = blocked.length ? Math.max(2.2, blocked[0].distance - 0.5) : fullDist;
+    // ease the occlusion pull-in: snap in quickly, recover gently, never pop
+    const k = targetDist < cam.smoothDist ? Math.min(1, dt * 14) : Math.min(1, dt * 3);
+    cam.smoothDist += (targetDist - cam.smoothDist) * k;
+    camPos = head.clone().addScaledVector(toCam, cam.smoothDist);
+    // only near the very bottom of the drag range does the view crane up
+    // (quadratic, so it eases in) — normal heights behave as before
+    const lowness = Math.max(0, 2.8 - cam.height);
+    lookGoal = new THREE.Vector3(player.position.x, player.position.y + 1.7 + lowness * lowness * 4, player.position.z);
   }
   const camK = 1 - Math.pow(0.0008, dt);
   camera.position.lerp(camPos, camK);
@@ -1743,14 +2273,20 @@ function animate() {
     const d = Math.hypot(player.position.x - m.site.pos.x, player.position.z - m.site.pos.z);
     if (d < best) { best = d; target = m; }
   }
-  compassDial.style.transform = `rotate(${(effYaw * 180) / Math.PI}deg)`;
+  // Guide needle: the arrow points toward the nearest uncharted site
+  // relative to the current view — walk the way it points. (In chart view
+  // the view is north-up, so it doubles as a map bearing.) The angle is
+  // kept continuous and smoothed in JS so the needle never spins the long
+  // way around when the target passes behind the camera.
   if (target) {
     const dx = target.site.pos.x - player.position.x;
     const dz = target.site.pos.z - player.position.z;
     const fx = -Math.sin(effYaw), fz = -Math.cos(effYaw);
     const rx = Math.cos(effYaw), rz = -Math.sin(effYaw);
     const rel = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
-    compassArrow.style.transform = `rotate(${(rel * 180) / Math.PI}deg)`;
+    let dAng = (((rel - needleAngle) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+    needleAngle += dAng * Math.min(1, dt * 9);
+    compassArrow.style.transform = `rotate(${(needleAngle * 180) / Math.PI}deg)`;
     compassArrow.style.opacity = '1';
   } else {
     compassArrow.style.opacity = '0.15';
@@ -1779,19 +2315,45 @@ function animate() {
     beaconCone.rotation.y = t;
   }
 
-  // --- street life ---
+  // --- landmark labels: always legible from the chart, discreet on foot ---
+  for (const L of landmarkLabels) {
+    let o, s;
+    if (chartView) {
+      o = 0.95;
+      s = 2.6;
+    } else {
+      const d = Math.hypot(player.position.x - L.x, player.position.z - L.z);
+      const fadeIn = L.range - 16;
+      o = d < fadeIn ? 1 : d > L.range ? 0 : 1 - (d - fadeIn) / 16;
+      s = 1;
+    }
+    L.sprite.material.opacity = o;
+    L.sprite.visible = o > 0.02;
+    if (L.sprite.visible) L.sprite.scale.set(L.w * s, L.h * s, 1);
+  }
+
+  // --- street life (pedestrians respect walls like everyone else) ---
   for (const w of wanderers) {
-    w.z += w.dir * w.speed * dt;
+    const nz = w.z + w.dir * w.speed * dt;
+    const [cx2, cz2] = collide(w.x, nz);
+    if (Math.abs(cz2 - nz) > 1e-4) {
+      w.dir *= -1; // blocked by a stoop, wagon, or wall — turn back
+    } else {
+      w.z = cz2;
+      w.x = cx2;
+    }
     if (w.z < w.z0) { w.z = w.z0; w.dir = 1; }
     if (w.z > w.z1) { w.z = w.z1; w.dir = -1; }
     w.g.position.set(w.x, Math.abs(Math.sin(t * 7 + w.ph)) * 0.04, w.z);
     w.g.rotation.y = w.dir > 0 ? 0 : Math.PI;
   }
 
-  // --- water ---
+  // --- water: a long swell with wind-chop riding on top ---
   for (let i = 0; i < wPos.count; i++) {
     const x = waterBase[i * 3], z = waterBase[i * 3 + 2];
-    wPos.array[i * 3 + 1] = Math.sin(x * 0.09 + t * 0.9) * Math.cos(z * 0.07 + t * 0.7) * 0.32;
+    wPos.array[i * 3 + 1] =
+      Math.sin(x * 0.09 + t * 0.9) * Math.cos(z * 0.07 + t * 0.7) * 0.28 +
+      Math.sin(x * 0.23 - t * 1.6) * Math.sin(z * 0.19 + t * 1.2) * 0.11;
   }
   wPos.needsUpdate = true;
   water.geometry.computeVertexNormals();

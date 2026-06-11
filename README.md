@@ -28,6 +28,19 @@ Own,"* The New York Times, January 19, 1982):
 - **M** (or the Chart View button) toggles a bird's-eye view of the whole island, in the spirit of the original 1982 map
 - The compass points to the nearest uncharted site; the Chart Key tracks progress
 
+## Landmarks
+
+Beyond the six Melville sites, the island carries the landmarks of his New
+York — everything shown stood by September 1891: the Statue of Liberty
+(1886, her copper still brown), Castle Williams on Governors Island, Castle
+Garden, City Hall (1812), Federal Hall with its Washington statue (1883),
+Trinity Church (1846), the Tribune (1875) and Western Union (1875)
+buildings, the gold-domed World Building (1890), Cooper Union (1859),
+Union Square with the equestrian Washington (1856), the Fifth Avenue Hotel
+(1859), Madison Square Garden with Saint-Gaudens's Diana, the Brooklyn
+Bridge (1883), and the Third Avenue El (1878). Landmark names fade in as
+you approach on foot, and all are labeled in the chart view.
+
 ## Tech
 
 - [Three.js](https://threejs.org/) (r160, loaded from CDN via an import map)

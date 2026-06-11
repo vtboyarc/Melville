@@ -43,6 +43,7 @@
         <span><b>Drag</b> to look around</span>
         <span><b>E</b> or tap to visit a site</span>
         <span><b>M</b> for the bird&rsquo;s-eye chart view</span>
+        <span><b>Tap</b> any pin or landmark to read about it</span>
         <span>On touch screens: left thumb walks, right thumb looks</span>
       </div>
       <button id="start-btn">Go ashore</button>
@@ -59,9 +60,9 @@
     <details id="chart-key" open>
       <summary>Chart Key</summary>
       <ol id="key-list"></ol>
+      <div class="key-note">Tap any red pin or named landmark&nbsp;&mdash; here or from the chart view&nbsp;&mdash; to read its story.</div>
     </details>
-    <div id="compass" title="Nearest uncharted site">
-      <div id="compass-dial">N</div>
+    <div id="compass" title="Points toward the nearest uncharted site">
       <div id="compass-arrow"></div>
     </div>
     <button id="view-btn" title="Toggle bird's-eye chart view (M)">Chart View</button>
@@ -76,6 +77,7 @@
       <div class="card-seal"><span id="card-num">1</span></div>
       <h2 id="card-title"></h2>
       <p id="card-dates" class="dates"></p>
+      <div id="card-media"></div>
       <div id="card-body"></div>
       <p id="card-artifact" class="artifact"></p>
       <button id="card-close">Continue exploring</button>

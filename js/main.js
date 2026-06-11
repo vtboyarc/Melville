@@ -115,7 +115,7 @@ try {
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.4, 1400);
 // Third-person follow camera: orbits the player, drag to look around.
 // 'chart' view lifts it high over the island like the old map.
-const cam = { yaw: 0, height: 5, dist: 11, lastDrag: -10 };
+const cam = { yaw: 0, height: 5, dist: 11, smoothDist: 11, lastDrag: -10 };
 // Chart-view vantage chosen so the full island plus the harbor landmarks
 // (z ≈ 122 to -112, x ≈ ±58) fit the 55° frustum even on a portrait phone.
 const CHART_CAM_POS = new THREE.Vector3(0, 215, 120);
@@ -2224,12 +2224,15 @@ function animate() {
     camRay.set(head, toCam);
     camRay.far = fullDist;
     const blocked = camRay.intersectObjects(occluders, false);
-    const camDist = blocked.length ? Math.max(2.2, blocked[0].distance - 0.5) : fullDist;
-    camPos = head.clone().addScaledVector(toCam, camDist);
-    // dragging the camera below shoulder height cranes the view upward,
-    // so towers and the statue can be seen from their feet
-    const lookUp = Math.max(0, 5 - cam.height) * 4.2;
-    lookGoal = new THREE.Vector3(player.position.x, player.position.y + 1.7 + lookUp, player.position.z);
+    const targetDist = blocked.length ? Math.max(2.2, blocked[0].distance - 0.5) : fullDist;
+    // ease the occlusion pull-in: snap in quickly, recover gently, never pop
+    const k = targetDist < cam.smoothDist ? Math.min(1, dt * 14) : Math.min(1, dt * 3);
+    cam.smoothDist += (targetDist - cam.smoothDist) * k;
+    camPos = head.clone().addScaledVector(toCam, cam.smoothDist);
+    // only near the very bottom of the drag range does the view crane up
+    // (quadratic, so it eases in) — normal heights behave as before
+    const lowness = Math.max(0, 2.8 - cam.height);
+    lookGoal = new THREE.Vector3(player.position.x, player.position.y + 1.7 + lowness * lowness * 4, player.position.z);
   }
   const camK = 1 - Math.pow(0.0008, dt);
   camera.position.lerp(camPos, camK);

@@ -212,16 +212,6 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   background: rgba(239, 230, 208, 0.9);
   box-shadow: 2px 2px 0 rgba(43, 38, 32, 0.25);
 }
-#compass-dial {
-  position: absolute;
-  inset: 0;
-  font-size: 10px;
-  color: var(--ink-soft);
-  text-align: center;
-  line-height: 1;
-  padding-top: 3px;
-  transition: transform 0.15s linear;
-}
 #compass-arrow {
   position: absolute;
   inset: 0;

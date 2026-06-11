@@ -2229,13 +2229,16 @@ function animate() {
     const d = Math.hypot(player.position.x - m.site.pos.x, player.position.z - m.site.pos.z);
     if (d < best) { best = d; target = m; }
   }
-  // North-up compass: N stays fixed at the top, the arrow shows the true
-  // map bearing of the nearest uncharted site (matching the chart view).
+  // Guide needle: the arrow points toward the nearest uncharted site
+  // relative to the current view — walk the way it points. (In chart view
+  // the view is north-up, so it doubles as a map bearing.)
   if (target) {
     const dx = target.site.pos.x - player.position.x;
     const dz = target.site.pos.z - player.position.z;
-    const bearing = Math.atan2(dx, -dz);
-    compassArrow.style.transform = `rotate(${(bearing * 180) / Math.PI}deg)`;
+    const fx = -Math.sin(effYaw), fz = -Math.cos(effYaw);
+    const rx = Math.cos(effYaw), rz = -Math.sin(effYaw);
+    const rel = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
+    compassArrow.style.transform = `rotate(${(rel * 180) / Math.PI}deg)`;
     compassArrow.style.opacity = '1';
   } else {
     compassArrow.style.opacity = '0.15';

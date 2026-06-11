@@ -27,6 +27,9 @@ Own,"* The New York Times, January 19, 1982):
 - **Drag** (mouse, or right thumb on touch screens) to look around; left thumb is the walk joystick
 - **M** (or the Chart View button) toggles a bird's-eye view of the whole island, in the spirit of the original 1982 map
 - The compass points to the nearest uncharted site; the Chart Key tracks progress
+- Charted sites are remembered between visits ("begin a new chart" on the
+  title screen starts over); the ♪ button mutes the sound
+- Chart all six and the tide turns — watch for it, or skip with any key
 
 ## Landmarks
 
@@ -48,6 +51,12 @@ you approach on foot, and all are labeled in the chart view.
 - The 1890 streetscape is procedural: brownstone/brick/cast-iron facades with
   per-window variation are drawn to canvas textures (with bump maps) at load
   time, and the whole city is merged into a handful of meshes for performance
+- The soundscape is procedural too: wind, harbor surf, the bell buoy, gulls,
+  footsteps, the El's whistle, and the ships' horns are all synthesized with
+  the Web Audio API — no audio files are shipped
+- Coal smoke from the locomotive and the steamers is a single `THREE.Points`
+  cloud (one draw call); the sun and clouds are canvas-textured sprites
+- Progress is saved to `localStorage`, so the chart survives a reload
 
 ## Run locally
 

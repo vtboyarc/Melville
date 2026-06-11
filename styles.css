@@ -245,6 +245,29 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
 #view-btn:hover { transform: none; background: var(--parchment); }
 #view-btn:active { transform: translateY(1px); box-shadow: 1px 1px 0 rgba(43, 38, 32, 0.25); }
 
+#mute-btn {
+  position: absolute;
+  bottom: 64px;
+  left: 18px;
+  pointer-events: auto;
+  margin: 0;
+  width: 38px;
+  font-size: 16px;
+  padding: 6px 0;
+  color: var(--ink);
+  background: rgba(239, 230, 208, 0.92);
+  border: 1.5px solid var(--ink);
+  border-radius: 3px;
+  box-shadow: 2px 2px 0 rgba(43, 38, 32, 0.25);
+}
+#mute-btn:hover { transform: none; background: var(--parchment); }
+#mute-btn.muted { opacity: 0.55; text-decoration: line-through; }
+
+/* all six charted: the needle turns gold and idles */
+#compass.compass-done #compass-arrow { animation: compass-idle 16s linear infinite; opacity: 0.85; }
+#compass.compass-done #compass-arrow::before { border-bottom-color: var(--gold); }
+@keyframes compass-idle { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
 /* ---------- visit button / toast ---------- */
 #visit-btn {
   position: fixed;
@@ -347,6 +370,7 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
 #card-body em, #epilogue-body em { color: var(--ink); }
 
 .artifact {
+  position: relative;
   margin-top: 18px;
   padding: 9px 14px;
   border: 1px dashed var(--ink-soft);
@@ -355,6 +379,29 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   color: var(--ink-soft);
 }
 .artifact b { color: var(--red); font-style: normal; }
+
+/* a wax-red stamp for a first visit */
+.artifact.stamped::after {
+  content: 'CHARTED';
+  position: absolute;
+  top: -16px;
+  right: -8px;
+  transform: rotate(-9deg);
+  font-family: 'IM Fell English SC', serif;
+  font-style: normal;
+  font-size: 15px;
+  letter-spacing: 0.18em;
+  color: var(--red);
+  border: 2px solid var(--red);
+  border-radius: 3px;
+  padding: 1px 8px;
+  background: rgba(239, 230, 208, 0.85);
+  animation: stamp-in 0.45s cubic-bezier(0.25, 1.6, 0.5, 1) 0.25s backwards;
+}
+@keyframes stamp-in {
+  from { opacity: 0; transform: rotate(-9deg) scale(2.2); }
+  to { opacity: 1; transform: rotate(-9deg) scale(1); }
+}
 
 #card-close, #epilogue-close { margin-top: 20px; }
 
@@ -384,6 +431,77 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   border: 1.5px solid rgba(43, 38, 32, 0.6);
 }
 
+/* first-time touch guidance, ghosted over the scene */
+#touch-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 18;
+  display: flex;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.6s ease;
+}
+.hint-half {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding-bottom: 18vh;
+  text-align: center;
+  font-style: italic;
+  font-size: 15px;
+  color: var(--parchment);
+  text-shadow: 0 1px 3px rgba(43, 38, 32, 0.8);
+}
+.hint-ring {
+  width: 84px;
+  height: 84px;
+  border: 2.5px dashed rgba(239, 230, 208, 0.85);
+  border-radius: 50%;
+  animation: hint-breathe 1.8s ease-in-out infinite;
+}
+.hint-swipe {
+  font-size: 44px;
+  line-height: 84px;
+  color: rgba(239, 230, 208, 0.9);
+  animation: hint-sway 1.8s ease-in-out infinite;
+}
+@keyframes hint-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+@keyframes hint-sway { 0%, 100% { transform: translateX(-12px); } 50% { transform: translateX(12px); } }
+
+/* the visit button asks for attention the first time it ever appears */
+#visit-btn.pulse { animation: bob 1.4s ease-in-out infinite, visit-glow 1.4s ease-in-out 3; }
+@keyframes visit-glow {
+  0%, 100% { box-shadow: 0 3px 0 #7d2418; }
+  50% { box-shadow: 0 3px 0 #7d2418, 0 0 22px 6px rgba(212, 175, 55, 0.55); }
+}
+
+.save-note {
+  margin-top: 12px;
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.reset-link {
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+  font-style: italic;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--red);
+  background: none;
+  border: none;
+  border-bottom: 1px dashed var(--red);
+  border-radius: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+.reset-link:hover { transform: none; color: var(--ink); border-color: var(--ink); }
+.reset-link:active { transform: none; box-shadow: none; }
+
 @media (max-width: 700px) {
   #chart-key { width: 188px; font-size: 12.5px; top: 60px; }
   #chart-key summary { font-size: 13px; }
@@ -392,4 +510,5 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   #compass { bottom: auto; top: 60px; left: 14px; right: auto; width: 46px; height: 46px; }
   #compass-arrow::before { top: 7px; border-left-width: 5px; border-right-width: 5px; border-bottom-width: 14px; }
   #view-btn { bottom: 14px; right: 14px; left: auto; font-size: 13px; padding: 7px 12px; }
+  #mute-btn { bottom: 58px; right: 14px; left: auto; }
 }

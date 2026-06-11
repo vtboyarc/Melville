@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { SITES, EPILOGUE } from './sites.js';
+import { audio } from './audio.js';
 
 /* ============================================================
    Melville's Manhattan — a walkable chart of the author's city
@@ -84,22 +85,33 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.08;
 
 const scene = new THREE.Scene();
-// hazy late-afternoon sky, the kind of light in old albumen photographs
-{
-  const cv = document.createElement('canvas');
-  cv.width = 16; cv.height = 256;
-  const ctx = cv.getContext('2d');
-  const g = ctx.createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0, '#93aabd');
-  g.addColorStop(0.5, '#c3c8bb');
-  g.addColorStop(0.75, '#e3d8be');
-  g.addColorStop(1, '#ecdfc4');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 16, 256);
-  const sky = new THREE.CanvasTexture(cv);
-  sky.colorSpace = THREE.SRGBColorSpace;
-  scene.background = sky;
+// hazy late-afternoon sky, the kind of light in old albumen photographs.
+// warmth slides the same gradient toward the golden dusk of the finale.
+const SKY_STOPS = [0, 0.5, 0.75, 1];
+const SKY_DAY = ['#93aabd', '#c3c8bb', '#e3d8be', '#ecdfc4'];
+const SKY_DUSK = ['#8d7d93', '#c98e5f', '#e8c193', '#ecd3a6'];
+const skyCanvas = document.createElement('canvas');
+skyCanvas.width = 16;
+skyCanvas.height = 256;
+const skyTex = new THREE.CanvasTexture(skyCanvas);
+skyTex.colorSpace = THREE.SRGBColorSpace;
+scene.background = skyTex;
+
+function lerpHexCss(a, b, t) {
+  const ca = parseInt(a.slice(1), 16), cb = parseInt(b.slice(1), 16);
+  const ch = (sh) => Math.round(((ca >> sh) & 255) + (((cb >> sh) & 255) - ((ca >> sh) & 255)) * t);
+  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
 }
+
+function setSky(warmth) {
+  const c = skyCanvas.getContext('2d');
+  const g = c.createLinearGradient(0, 0, 0, 256);
+  SKY_STOPS.forEach((s, i) => g.addColorStop(s, lerpHexCss(SKY_DAY[i], SKY_DUSK[i], warmth)));
+  c.fillStyle = g;
+  c.fillRect(0, 0, 16, 256);
+  skyTex.needsUpdate = true;
+}
+setSky(0);
 scene.fog = new THREE.Fog(0xe0d7be, 130, 320);
 const FOG_VIEWS = { street: { near: 130, far: 320 }, chart: { near: 600, far: 1300 } };
 
@@ -1810,18 +1822,213 @@ let whale, spout;
   scene.add(whale);
 }
 
-// Gulls over the harbor.
+// Gulls over the harbor. Wings hinge at the body and the birds spend
+// most of their time gliding, the way real gulls do.
 const gulls = [];
-for (let i = 0; i < 5; i++) {
-  const g = new THREE.Group();
-  const wmat = new THREE.MeshBasicMaterial({ color: 0x3a352e, side: THREE.DoubleSide });
-  const w1 = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.28), wmat);
-  const w2 = w1.clone();
-  w1.position.x = -0.55;
-  w2.position.x = 0.55;
-  g.add(w1, w2);
-  scene.add(g);
-  gulls.push({ g, w1, w2, r: 12 + Math.random() * 14, h: 9 + Math.random() * 6, a: Math.random() * Math.PI * 2, s: 0.25 + Math.random() * 0.25 });
+{
+  const gullMat = new THREE.MeshBasicMaterial({ color: 0x3a352e, side: THREE.DoubleSide });
+  for (let i = 0; i < 5; i++) {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.55), gullMat);
+    // wing roots at the origin so rotation.z flaps them up and down
+    const w1 = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.3).translate(-0.525, 0, 0).rotateX(-Math.PI / 2), gullMat);
+    const w2 = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.3).translate(0.525, 0, 0).rotateX(-Math.PI / 2), gullMat);
+    g.add(body, w1, w2);
+    scene.add(g);
+    const h = 9 + Math.random() * 6;
+    gulls.push({
+      g, w1, w2, h,
+      y: h,
+      r: 12 + Math.random() * 14,
+      a: Math.random() * Math.PI * 2,
+      s: 0.25 + Math.random() * 0.25,
+      p: Math.random() * Math.PI * 2, // flap phase
+      flap: 0,
+      gliding: Math.random() < 0.5,
+      st: 1 + Math.random() * 3, // time until the next glide/flap switch
+    });
+  }
+}
+
+/* ---------------- atmosphere: sun, clouds, coal smoke ---------------- */
+
+// The pale veiled sun of an albumen print — a world-space billboard that
+// keeps its bearing as the walker moves. (The sky canvas itself is a
+// screen-fixed background, so the sun cannot live there.)
+const SUN_DIR_DAY = new THREE.Vector3(70, 62, 45).normalize();
+const SUN_DIR_DUSK = new THREE.Vector3(70, 30, 45).normalize();
+const sunDirCur = SUN_DIR_DAY.clone();
+const sunSprite = (() => {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 256;
+  const c = cv.getContext('2d');
+  const g = c.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, 'rgba(255,248,225,1)');
+  g.addColorStop(0.12, 'rgba(255,243,210,0.9)');
+  g.addColorStop(0.35, 'rgba(248,231,190,0.32)');
+  g.addColorStop(1, 'rgba(248,231,190,0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthWrite: false, fog: false, opacity: 0,
+  }));
+  sp.scale.setScalar(110);
+  sp.renderOrder = -10;
+  scene.add(sp);
+  return sp;
+})();
+
+// A few slow clouds, ivory toward the fog so they read as harbor haze.
+const clouds = [];
+{
+  const cloudTexture = () => {
+    const cv = document.createElement('canvas');
+    cv.width = 256;
+    cv.height = 128;
+    const c = cv.getContext('2d');
+    for (let i = 0; i < 9; i++) {
+      const x = 40 + Math.random() * 176, y = 48 + Math.random() * 38, r = 22 + Math.random() * 30;
+      const g = c.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, 'rgba(245,239,222,0.55)');
+      g.addColorStop(1, 'rgba(245,239,222,0)');
+      c.fillStyle = g;
+      c.fillRect(0, 0, 256, 128);
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+  const texes = [cloudTexture(), cloudTexture(), cloudTexture()];
+  for (let i = 0; i < 6; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: texes[i % 3], transparent: true, depthWrite: false, fog: false, opacity: 0,
+    }));
+    const w = 70 + Math.random() * 60;
+    sp.scale.set(w, w * 0.42, 1);
+    sp.position.set(-260 + Math.random() * 520, 135 + Math.random() * 40, -180 + Math.random() * 320);
+    sp.renderOrder = -9;
+    scene.add(sp);
+    clouds.push({ sp, speed: 0.8 + Math.random() * 0.9, peak: 0.4 + Math.random() * 0.25 });
+  }
+}
+
+// Coal smoke: one Points cloud shared by the El locomotive and the two
+// moving steamers — a single draw call for every plume in the harbor.
+const smoke = (() => {
+  const N = 130;
+  const pos = new Float32Array(N * 3);
+  const aSize = new Float32Array(N);
+  const aAlpha = new Float32Array(N);
+  const parts = [];
+  for (let i = 0; i < N; i++) {
+    parts.push({ age: Infinity, life: 1, x: 0, y: -50, z: 0, vx: 0, vy: 0, vz: 0 });
+    pos[i * 3 + 1] = -50;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aSize', new THREE.BufferAttribute(aSize, 1));
+  geo.setAttribute('aAlpha', new THREE.BufferAttribute(aAlpha, 1));
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const c = cv.getContext('2d');
+  const grad = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.4)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = grad;
+  c.fillRect(0, 0, 64, 64);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: new THREE.CanvasTexture(cv) },
+      color: { value: new THREE.Color(0x6b655c) },
+    },
+    vertexShader: `
+      attribute float aSize;
+      attribute float aAlpha;
+      varying float vA;
+      void main() {
+        vA = aAlpha;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = min(aSize * (240.0 / -mv.z), 220.0);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform sampler2D map;
+      uniform vec3 color;
+      varying float vA;
+      void main() {
+        gl_FragColor = vec4(color, texture2D(map, gl_PointCoord).a * vA);
+      }`,
+    transparent: true,
+    depthWrite: false,
+  });
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false; // particles roam the whole harbor
+  scene.add(points);
+
+  const tip = new THREE.Vector3();
+  let cursor = 0;
+  function emit(obj, lx, ly, lz, vy) {
+    tip.set(lx, ly, lz);
+    obj.localToWorld(tip);
+    const p = parts[cursor];
+    cursor = (cursor + 1) % N;
+    p.age = 0;
+    p.life = 3.2 + Math.random() * 1.4;
+    p.x = tip.x + (Math.random() - 0.5) * 0.3;
+    p.y = tip.y;
+    p.z = tip.z + (Math.random() - 0.5) * 0.3;
+    p.vx = 0.5 + Math.random() * 0.4; // downwind, with the clouds
+    p.vy = vy * (0.85 + Math.random() * 0.3);
+    p.vz = (Math.random() - 0.5) * 0.3;
+  }
+  function update(dt) {
+    for (let i = 0; i < N; i++) {
+      const p = parts[i];
+      if (p.age > p.life) { aAlpha[i] = 0; continue; }
+      p.age += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+      p.vy *= 1 - dt * 0.25;
+      const k = p.age / p.life;
+      pos[i * 3] = p.x;
+      pos[i * 3 + 1] = p.y;
+      pos[i * 3 + 2] = p.z;
+      aSize[i] = 1.4 + k * 4.2;
+      aAlpha[i] = k < 0.12 ? (k / 0.12) * 0.4 : 0.4 * (1 - (k - 0.12) / 0.88);
+    }
+    geo.attributes.position.needsUpdate = true;
+    geo.attributes.aSize.needsUpdate = true;
+    geo.attributes.aAlpha.needsUpdate = true;
+  }
+  return { emit, update };
+})();
+let smokeTrainT = 0, smokeShipBT = 0, smokeShipCT = 0;
+
+// "The Tide Turns": once the chart is complete the whole island settles
+// into a permanent golden hour. warmth runs 0 (day) to 1 (dusk).
+let duskW = 0;
+let lastSkyW = 0;
+const FOG_DAY = new THREE.Color(0xe0d7be), FOG_DUSK = new THREE.Color(0xdcb27e);
+const SUNLIGHT_DAY = new THREE.Color(0xffe0ac), SUNLIGHT_DUSK = new THREE.Color(0xffb070);
+const SUNDISC_DAY = new THREE.Color(0xffffff), SUNDISC_DUSK = new THREE.Color(0xffc890);
+function applyDusk(w) {
+  duskW = w;
+  if (Math.abs(w - lastSkyW) > 0.02 || ((w === 0 || w === 1) && w !== lastSkyW)) {
+    setSky(w);
+    lastSkyW = w;
+  }
+  scene.fog.color.lerpColors(FOG_DAY, FOG_DUSK, w);
+  sun.color.lerpColors(SUNLIGHT_DAY, SUNLIGHT_DUSK, w);
+  sun.intensity = 2.6 - 0.5 * w;
+  hemi.intensity = 1.15 - 0.2 * w;
+  renderer.toneMappingExposure = 1.08 + 0.06 * w;
+  sunDirCur.lerpVectors(SUN_DIR_DAY, SUN_DIR_DUSK, w).normalize();
+  sunSprite.material.color.lerpColors(SUNDISC_DAY, SUNDISC_DUSK, w);
+  sunSprite.scale.setScalar(110 * (1 + 0.45 * w));
 }
 
 /* ---------------- site markers ---------------- */
@@ -1912,6 +2119,7 @@ scene.add(beacon);
 const keys = {};
 window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
+  if (finale) { skipFinale(); return; }
   if ((e.code === 'KeyE' || e.code === 'Enter') && state.started) tryVisit();
   if (e.code === 'KeyM' && state.started) toggleView();
 });
@@ -1929,9 +2137,11 @@ function onUi(e) {
 }
 
 window.addEventListener('pointerdown', (e) => {
+  if (finale) { skipFinale(); return; }
   if (!state.started || state.modal || onUi(e)) return;
   const wantsJoy = e.pointerType === 'touch' && e.clientX < window.innerWidth * 0.45;
   if (wantsJoy && joy.id === null) {
+    if (touchHintHide) touchHintHide();
     joy.id = e.pointerId;
     joy.ox = e.clientX;
     joy.oy = e.clientY;
@@ -1984,6 +2194,17 @@ window.addEventListener('pointercancel', endPointer);
 
 const state = { started: false, modal: false, visitedCount: 0, nearSite: null, epilogueShown: false, view: 'street' };
 
+// The chart remembers: visited sites persist across sessions.
+const SAVE_KEY = 'melville-charted-v1';
+const save = (() => {
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}') || {}; } catch { /* private mode */ }
+  return Object.assign({ charted: [], epilogueShown: false, muted: false }, s);
+})();
+function persistSave() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch { /* private mode */ }
+}
+
 const introEl = document.getElementById('intro');
 const hudEl = document.getElementById('hud');
 const visitBtn = document.getElementById('visit-btn');
@@ -1992,6 +2213,7 @@ const toastEl = document.getElementById('toast');
 const cardEl = document.getElementById('card');
 const epilogueEl = document.getElementById('epilogue');
 const progressEl = document.getElementById('progress');
+const compassEl = document.getElementById('compass');
 const compassArrow = document.getElementById('compass-arrow');
 
 const viewBtn = document.getElementById('view-btn');
@@ -2022,13 +2244,55 @@ function toast(msg, ms = 4200) {
   }, ms);
 }
 
+// A returning walker is greeted as one.
+if (save.charted.length > 0) {
+  document.getElementById('start-btn').textContent = 'Return ashore';
+  const note = document.createElement('p');
+  note.className = 'save-note';
+  note.textContent = `${save.charted.length} of ${SITES.length} sites already charted`;
+  document.getElementById('start-btn').after(note);
+}
+
+// First-time touch players get a moment of ghosted guidance.
+let touchHintHide = null;
+function showTouchHint() {
+  if (!('ontouchstart' in window) || save.charted.length > 0) return;
+  const hint = document.getElementById('touch-hint');
+  hint.classList.remove('hidden');
+  touchHintHide = () => {
+    touchHintHide = null;
+    hint.style.opacity = '0';
+    setTimeout(() => hint.classList.add('hidden'), 600);
+  };
+  setTimeout(() => { if (touchHintHide) touchHintHide(); }, 6500);
+}
+
 document.getElementById('start-btn').addEventListener('click', () => {
   introEl.classList.add('hidden');
   hudEl.classList.remove('hidden');
   state.started = true;
+  audio.init(); // the user gesture browsers require before sound
+  audio.setMuted(save.muted);
   if (window.innerWidth < 700) document.getElementById('chart-key').removeAttribute('open');
-  toast('You step ashore at the Battery. Six red markers wait on the island — the compass points to the nearest.');
+  toast(save.charted.length > 0
+    ? 'Back ashore. The chart remembers what you have already found.'
+    : 'You step ashore at the Battery. Six red markers wait on the island — the compass points to the nearest.');
+  showTouchHint();
 });
+
+const muteBtn = document.getElementById('mute-btn');
+function reflectMute() {
+  muteBtn.classList.toggle('muted', save.muted);
+  muteBtn.title = save.muted ? 'Sound is off — tap to unmute' : 'Sound is on — tap to mute';
+}
+muteBtn.addEventListener('click', () => {
+  save.muted = !save.muted;
+  persistSave();
+  audio.setMuted(save.muted);
+  reflectMute();
+});
+audio.setMuted(save.muted);
+reflectMute();
 
 function tryVisit() {
   if (!state.nearSite || state.modal) return;
@@ -2057,6 +2321,7 @@ function handleTap(cx, cy) {
 function openLandmarkCard(info) {
   if (!info) return;
   state.modal = true;
+  audio.play('pageTurn');
   document.getElementById('card-num').textContent = '★';
   document.getElementById('card-title').textContent = info.name;
   document.getElementById('card-dates').textContent = info.year
@@ -2068,8 +2333,46 @@ function openLandmarkCard(info) {
   cardEl.classList.remove('hidden');
 }
 
+// Settle a pin into its final "charted" look (also used after the pop FX).
+function settlePin(m) {
+  m.pinMat.color.set(COLORS.ink);
+  m.pinMat.emissive.set(0x000000);
+  m.ring.material.color.set(COLORS.ink);
+  m.ring.material.opacity = 0.4;
+  m.ring.scale.setScalar(1);
+  m.fxScale = 1;
+}
+
+// Chart a site: bookkeeping shared by a live visit and a restored save.
+// A live visit keeps the pin red until the card closes, so the player
+// actually sees it being inked onto the chart (the FX runs in animate).
+let pendingPinFx = null;
+const pinFx = [];
+const PIN_RED = new THREE.Color(COLORS.red);
+const PIN_INK = new THREE.Color(COLORS.ink);
+const PIN_EMBER = new THREE.Color(0x3a0e08);
+const PIN_BLACK = new THREE.Color(0x000000);
+function chartSite(marker, { silent = false } = {}) {
+  if (marker.visited) return;
+  marker.visited = true;
+  state.visitedCount++;
+  document.getElementById(`key-${marker.site.id}`).classList.add('done');
+  progressEl.textContent = `${state.visitedCount} of ${SITES.length} sites charted`;
+  if (!save.charted.includes(marker.site.id)) {
+    save.charted.push(marker.site.id);
+    persistSave();
+  }
+  if (silent) {
+    settlePin(marker);
+  } else {
+    pendingPinFx = marker;
+    audio.play('chime');
+  }
+}
+
 function openCard(marker) {
   state.modal = true;
+  audio.play('pageTurn');
   const s = marker.site;
   document.getElementById('card-num').textContent = s.num;
   document.getElementById('card-title').textContent = s.title;
@@ -2092,34 +2395,93 @@ function openCard(marker) {
   document.getElementById('card-body').innerHTML = s.body.map((p) => `<p>${p}</p>`).join('');
   const artifactEl = document.getElementById('card-artifact');
   artifactEl.style.display = '';
-  artifactEl.innerHTML = marker.visited
-    ? `<b>Collected:</b> ${s.artifact}`
-    : `<b>Artifact found:</b> ${s.artifact}`;
+  const firstVisit = !marker.visited;
+  artifactEl.innerHTML = firstVisit
+    ? `<b>Artifact found:</b> ${s.artifact}`
+    : `<b>Collected:</b> ${s.artifact}`;
+  artifactEl.classList.toggle('stamped', firstVisit);
   cardEl.classList.remove('hidden');
-  if (!marker.visited) {
-    marker.visited = true;
-    state.visitedCount++;
-    marker.pinMat.color.set(COLORS.ink);
-    marker.pinMat.emissive.set(0x000000);
-    marker.ring.material.color.set(COLORS.ink);
-    marker.ring.material.opacity = 0.4;
-    document.getElementById(`key-${s.id}`).classList.add('done');
-    progressEl.textContent = `${state.visitedCount} of ${SITES.length} sites charted`;
-  }
+  if (firstVisit) chartSite(marker);
 }
 
 document.getElementById('card-close').addEventListener('click', () => {
   cardEl.classList.add('hidden');
   state.modal = false;
+  if (pendingPinFx) {
+    pinFx.push({ m: pendingPinFx, t: 0 });
+    audio.play('bell');
+    pendingPinFx = null;
+  }
   if (state.visitedCount === SITES.length && !state.epilogueShown) {
     state.epilogueShown = true;
-    setTimeout(() => {
-      document.getElementById('epilogue-body').innerHTML = EPILOGUE.map((p) => `<p>${p}</p>`).join('');
-      epilogueEl.classList.remove('hidden');
-      state.modal = true;
-    }, 450);
+    save.epilogueShown = true;
+    persistSave();
+    startFinale();
   }
 });
+
+function showEpilogue() {
+  document.getElementById('epilogue-body').innerHTML = EPILOGUE.map((p) => `<p>${p}</p>`).join('');
+  epilogueEl.classList.remove('hidden');
+  state.modal = true;
+}
+
+/* ---------------- finale: the tide turns ---------------- */
+
+// When the sixth site is charted the camera lifts off the streets,
+// crosses the rooftops and the harbor, and settles before the Statue of
+// Liberty while the horns answer and the light goes to gold. Any key or
+// tap skips it; the dusk it leaves behind is permanent.
+let finale = null;
+const LIBERTY_LOOK = new THREE.Vector3(-33, 15, 107);
+function startFinale() {
+  if (state.view === 'chart') toggleView();
+  state.modal = true; // freezes the walker and hides the visit button
+  hudEl.classList.add('hidden');
+  const p = player.position;
+  finale = {
+    t: 0,
+    dur: 14,
+    curve: new THREE.CatmullRomCurve3([
+      camera.position.clone(),
+      new THREE.Vector3(p.x, 38, p.z + 25),
+      new THREE.Vector3(8, 55, 55),
+      new THREE.Vector3(-10, 26, 86),
+    ]),
+    horns: [[2, 82, 0.4], [5, 116, 0.28], [8.2, 96, 0.34]],
+    gullsAt: 3.5,
+  };
+}
+
+function skipFinale() {
+  if (!finale || finale.t < 1) return;
+  finale.t = finale.dur;
+  finale.horns = [];
+  finale.gullsAt = 0;
+}
+
+function smoothstep01(x) {
+  return x * x * (3 - 2 * x);
+}
+
+function updateFinale(dt) {
+  finale.t += dt;
+  applyDusk(Math.min(1, finale.t / 8));
+  while (finale.horns.length && finale.t >= finale.horns[0][0]) {
+    const [, freq, gain] = finale.horns.shift();
+    audio.play('horn', { freq, gain });
+  }
+  if (finale.gullsAt && finale.t >= finale.gullsAt) {
+    finale.gullsAt = 0;
+    audio.play('gull');
+  }
+  if (finale.t >= finale.dur) {
+    finale = null;
+    applyDusk(1);
+    hudEl.classList.remove('hidden');
+    showEpilogue();
+  }
+}
 document.getElementById('epilogue-close').addEventListener('click', () => {
   epilogueEl.classList.add('hidden');
   state.modal = false;
@@ -2131,6 +2493,28 @@ document.getElementById('epilogue-close').addEventListener('click', () => {
 const SPEED = 7.5;
 let needleAngle = 0; // continuous compass-needle angle, radians
 let walkPhase = 0;
+let lastStepSign = true; // footstep trigger: sign of the leg swing
+let visitPulsed = false; // the first visit prompt glows once
+let shoreTimer = 0;
+let shoreCached = 50; // distance to the nearest stretch of shoreline
+
+function shoreDistance(px, pz) {
+  let d = Infinity;
+  for (let i = 0; i < ISLAND.length; i++) {
+    const [ax, az] = ISLAND[i];
+    const [bx, bz] = ISLAND[(i + 1) % ISLAND.length];
+    d = Math.min(d, distToSegment(px, pz, ax, az, bx, bz));
+  }
+  return d;
+}
+
+// the El announces its turnarounds, louder the closer you stand
+function trainWhistle() {
+  if (!state.started) return;
+  const d = Math.hypot(player.position.x - EL_X, player.position.z - train.position.z);
+  const g = Math.max(0, 1 - d / 140);
+  if (g > 0.03) audio.play('whistle', { gain: 0.02 + 0.28 * g * g });
+}
 const clock = new THREE.Clock();
 const camRay = new THREE.Raycaster();
 
@@ -2200,12 +2584,27 @@ function animate() {
   legL.rotation.x = Math.sin(walkPhase) * swing;
   legR.rotation.x = -Math.sin(walkPhase) * swing;
   player.position.y = moving > 0.01 ? Math.abs(Math.sin(walkPhase)) * 0.1 : 0;
+  // each leg-swing crossing is a footfall — planks on the piers, stone ashore
+  const stepSign = Math.sin(walkPhase) >= 0;
+  if (moving > 0.01 && stepSign !== lastStepSign) {
+    audio.play(pointInPoly(player.position.x, player.position.z) ? 'step' : 'stepWood');
+  }
+  lastStepSign = stepSign;
 
   // --- camera: street view orbits behind him; chart view frames the whole
   // island from a fixed vantage, like the 1982 map ---
   const chartView = state.view === 'chart';
   let camPos, lookGoal;
-  if (chartView) {
+  if (finale) {
+    updateFinale(dt);
+  }
+  if (finale) {
+    // the long crane shot out to the harbor; settles 3 s before the card
+    const u = smoothstep01(Math.min(1, finale.t / (finale.dur - 3)));
+    camPos = finale.curve.getPoint(u);
+    const lookK = smoothstep01(Math.min(1, finale.t / 5));
+    lookGoal = new THREE.Vector3(player.position.x, 1.9, player.position.z).lerp(LIBERTY_LOOK, lookK);
+  } else if (chartView) {
     camPos = CHART_CAM_POS;
     lookGoal = CHART_LOOK_AT;
   } else {
@@ -2244,6 +2643,16 @@ function animate() {
   sun.position.set(player.position.x + 70, 100, player.position.z + 45);
   sun.target.position.set(player.position.x, 0, player.position.z);
 
+  // --- the sun's disc and the clouds belong to the street sky only;
+  // from the chart's altitude they would hang between camera and island ---
+  sunSprite.position.copy(player.position).addScaledVector(sunDirCur, 850);
+  sunSprite.material.opacity += ((chartView ? 0 : 0.95) - sunSprite.material.opacity) * Math.min(1, dt * 3);
+  for (const cl of clouds) {
+    cl.sp.position.x += cl.speed * dt;
+    if (cl.sp.position.x > 290) cl.sp.position.x = -290;
+    cl.sp.material.opacity += ((chartView ? 0 : cl.peak) - cl.sp.material.opacity) * Math.min(1, dt * 2);
+  }
+
   // --- proximity / visit prompt ---
   let near = null, nearD = 8;
   for (const m of markers) {
@@ -2255,6 +2664,12 @@ function animate() {
     if (near && state.started && !state.modal) {
       visitLabel.textContent = `${near.visited ? 'Revisit' : 'Visit'}: ${near.site.title.split('—')[0].trim()}`;
       visitBtn.classList.remove('hidden');
+      if (!visitPulsed) {
+        // the very first prompt glows so nobody walks past it
+        visitPulsed = true;
+        visitBtn.classList.add('pulse');
+        setTimeout(() => visitBtn.classList.remove('pulse'), 4400);
+      }
     } else {
       visitBtn.classList.add('hidden');
     }
@@ -2288,15 +2703,35 @@ function animate() {
     needleAngle += dAng * Math.min(1, dt * 9);
     compassArrow.style.transform = `rotate(${(needleAngle * 180) / Math.PI}deg)`;
     compassArrow.style.opacity = '1';
-  } else {
-    compassArrow.style.opacity = '0.15';
+  } else if (!compassEl.classList.contains('compass-done')) {
+    // all six charted: the needle turns gold and idles
+    compassEl.classList.add('compass-done');
+    compassEl.title = 'All six sites charted';
+    compassArrow.style.opacity = '';
+    compassArrow.style.transform = '';
+  }
+
+  // --- the moment of charting: pin pops and settles to ink, ring ripples ---
+  for (let i = pinFx.length - 1; i >= 0; i--) {
+    const fx = pinFx[i];
+    fx.t += dt;
+    const k = Math.min(1, fx.t / 1.2);
+    fx.m.fxScale = 1 + Math.sin(Math.min(1, fx.t / 0.5) * Math.PI) * 0.5;
+    fx.m.ring.scale.setScalar(1 + k * 2.2);
+    fx.m.ring.material.opacity = 0.85 * (1 - k);
+    fx.m.pinMat.color.lerpColors(PIN_RED, PIN_INK, k);
+    fx.m.pinMat.emissive.lerpColors(PIN_EMBER, PIN_BLACK, k);
+    if (k >= 1) {
+      settlePin(fx.m);
+      pinFx.splice(i, 1);
+    }
   }
 
   // --- markers bob (and swell so they read from the chart view) ---
   for (const m of markers) {
     const ss = chartView ? 12 : 3.6;
     m.sprite.scale.set(ss, ss, 1);
-    m.pin.scale.setScalar(chartView ? 2.8 : 1);
+    m.pin.scale.setScalar((chartView ? 2.8 : 1) * (m.fxScale || 1));
     if (!m.visited) {
       m.pin.position.y = Math.sin(t * 2 + m.phase) * 0.4 + 0.2;
       m.pin.rotation.y = t * 0.8;
@@ -2371,8 +2806,17 @@ function animate() {
   if (driftC.position.x > 110) driftC.position.x = -110;
 
   train.position.z += trainDir * dt * 9;
-  if (train.position.z < -103) { train.position.z = -103; trainDir = 1; train.rotation.y = Math.PI; }
-  if (train.position.z > -8) { train.position.z = -8; trainDir = -1; train.rotation.y = 0; }
+  if (train.position.z < -103) { train.position.z = -103; trainDir = 1; train.rotation.y = Math.PI; trainWhistle(); }
+  if (train.position.z > -8) { train.position.z = -8; trainDir = -1; train.rotation.y = 0; trainWhistle(); }
+
+  // --- coal smoke from the locomotive and the two moving steamers ---
+  smokeTrainT += dt;
+  while (smokeTrainT > 0.3) { smokeTrainT -= 0.3; smoke.emit(train, 0, 9.95, 6, 2.4); }
+  smokeShipBT += dt;
+  while (smokeShipBT > 0.45) { smokeShipBT -= 0.45; smoke.emit(driftB, 0, 5.1, 0.5, 1.7); }
+  smokeShipCT += dt;
+  while (smokeShipCT > 0.45) { smokeShipCT -= 0.45; smoke.emit(driftC, 0, 5.1, 0.5, 1.7); }
+  smoke.update(dt);
 
   diana.rotation.y = t * 0.4;
 
@@ -2387,12 +2831,40 @@ function animate() {
 
   for (const gl of gulls) {
     gl.a += dt * gl.s;
-    gl.g.position.set(Math.cos(gl.a) * gl.r - 2, gl.h + Math.sin(t + gl.r) * 0.8, 88 + Math.sin(gl.a) * gl.r);
+    // gulls mostly glide; flap comes in bursts, downstroke faster than up
+    gl.st -= dt;
+    if (gl.st <= 0) {
+      gl.gliding = !gl.gliding;
+      gl.st = gl.gliding ? 1.6 + Math.random() * 2.6 : 0.9 + Math.random() * 1.6;
+      if (!gl.gliding && Math.random() < 0.3) audio.play('gull');
+    }
+    if (!gl.gliding) gl.p += dt * 10 * (Math.sin(gl.p) > 0 ? 1.5 : 0.75);
+    const flapGoal = gl.gliding ? -0.16 : Math.sin(gl.p) * 0.85;
+    gl.flap += (flapGoal - gl.flap) * Math.min(1, dt * 12);
+    gl.w1.rotation.z = gl.flap;
+    gl.w2.rotation.z = -gl.flap;
+    // sink on the glide, climb on the burst; the circle itself breathes
+    gl.y = Math.max(gl.h - 1.5, Math.min(gl.h + 2, gl.y + (gl.gliding ? -0.35 : 0.55) * dt));
+    const r = gl.r + Math.sin(t * 0.13 + gl.r) * 2.5;
+    gl.g.position.set(Math.cos(gl.a) * r - 2, gl.y + Math.sin(t + gl.r) * 0.4, 88 + Math.sin(gl.a) * r);
     gl.g.rotation.y = -gl.a;
-    const flap = Math.sin(t * 9 + gl.r) * 0.5;
-    gl.w1.rotation.y = 0.35 + flap * 0.5;
-    gl.w2.rotation.y = -0.35 - flap * 0.5;
+    gl.g.rotation.z = -0.24; // banked into the turn
   }
+
+  // --- the soundscape follows the walk: surf swells by the shore ---
+  shoreTimer -= dt;
+  if (shoreTimer <= 0) {
+    shoreTimer = 0.25;
+    shoreCached = pointInPoly(player.position.x, player.position.z)
+      ? shoreDistance(player.position.x, player.position.z)
+      : 0; // on a pier, the water is right under the planks
+  }
+  audio.update(dt, {
+    px: player.position.x,
+    pz: player.position.z,
+    shore: shoreCached,
+    ducked: state.modal && !finale,
+  });
 
   renderer.render(scene, camera);
 }
@@ -2402,5 +2874,15 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// Restore a returning walker's chart before the first frame.
+for (const id of save.charted) {
+  const m = markers.find((mk) => mk.site.id === id);
+  if (m) chartSite(m, { silent: true });
+}
+if (save.epilogueShown) {
+  state.epilogueShown = true;
+  applyDusk(1); // the tide turned in an earlier session; the dusk holds
+}
 
 animate();

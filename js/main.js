@@ -1047,46 +1047,83 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 // The Statue of Liberty (1886) — five years old, her copper still brown.
 {
   const lx = -34, lz = 107;
-  box(13, 1.6, 12, COLORS.outerLand, lx, -0.6, lz, scene, false); // Bedloe's Island
-  box(8, 2, 8, 0xa39782, lx, 1, lz); // star fort base
-  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.7, 9.5, 4), lambert(0xb9ad97));
-  pedestal.rotation.y = Math.PI / 4;
-  pedestal.position.set(lx, 6.75, lz);
-  pedestal.castShadow = true;
-  scene.add(pedestal);
-  const copper = lambert(0x7a5b46);
-  const robe = new THREE.Mesh(new THREE.CylinderGeometry(1.45, 2.5, 10.5, 9), copper);
-  robe.position.set(lx, 16.75, lz);
-  robe.castShadow = true;
-  const headL = new THREE.Mesh(new THREE.SphereGeometry(0.98, 10, 8), copper);
-  headL.position.set(lx, 22.7, lz);
-  scene.add(robe, headL);
-  for (let i = 0; i < 7; i++) { // the crown's rays
-    const ray = new THREE.Mesh(new THREE.ConeGeometry(0.14, 1.15, 5), copper);
-    const a = -Math.PI / 2 + (i / 6) * Math.PI;
-    ray.position.set(lx + Math.cos(a) * 1.05, 23.4 + Math.sin(a) * 0.7, lz);
-    ray.rotation.z = -a + Math.PI / 2;
-    scene.add(ray);
+  box(15, 1.6, 14, COLORS.outerLand, lx, -0.6, lz, scene, false); // Bedloe's Island
+  // the star-shaped ramparts of Fort Wood
+  const starPts = [];
+  for (let i = 0; i < 22; i++) {
+    const a = (i / 22) * Math.PI * 2;
+    const rad = i % 2 === 0 ? 6 : 4;
+    starPts.push(new THREE.Vector2(Math.cos(a) * rad, Math.sin(a) * rad));
   }
-  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.52, 6.3, 7), copper);
-  arm.position.set(lx + 1.8, 24.8, lz);
-  arm.rotation.z = -0.38;
-  arm.castShadow = true;
-  const torch = new THREE.Mesh(
-    new THREE.ConeGeometry(0.68, 1.65, 7),
-    new THREE.MeshPhongMaterial({ color: COLORS.gold, emissive: 0x6b5410, shininess: 90 })
-  );
-  torch.position.set(lx + 2.95, 28.5, lz);
-  const tablet = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.2, 0.36), copper);
-  tablet.position.set(lx - 2, 19.5, lz);
-  tablet.rotation.z = 0.25;
-  scene.add(arm, torch, tablet);
+  const starGeo = new THREE.ExtrudeGeometry(new THREE.Shape(starPts), { depth: 2.2, bevelEnabled: false });
+  starGeo.rotateX(Math.PI / 2);
+  const star = new THREE.Mesh(starGeo, lambert(0xa39782));
+  star.position.set(lx, 2.2, lz);
+  star.castShadow = star.receiveShadow = true;
+  scene.add(star);
+  // stepped granite pedestal
+  box(5.4, 1.3, 5.4, 0xa89c85, lx, 2.85, lz);
+  const ped = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 3.1, 7.6, 4), lambert(0xb9ad97));
+  ped.rotation.y = Math.PI / 4;
+  ped.position.set(lx, 7.3, lz);
+  ped.castShadow = true;
+  scene.add(ped);
+  box(4.5, 0.7, 4.5, 0xcabfa6, lx, 11.4, lz); // cornice
+  box(3.2, 1.5, 3.2, 0xb3a78f, lx, 12.4, lz); // statue plinth
+
+  // Liberty Enlightening the World, facing southeast toward the Narrows
+  const fig = new THREE.Group();
+  const copper = new THREE.MeshStandardMaterial({ color: 0x7a5b46, roughness: 0.55, metalness: 0.35, envMapIntensity: 1.1 });
+  const gold = new THREE.MeshStandardMaterial({ color: COLORS.gold, roughness: 0.25, metalness: 0.85, emissive: 0x3a2c08 });
+  const part = (geo, x, y, z, rx = 0, rz = 0) => {
+    const m = new THREE.Mesh(geo, copper);
+    m.position.set(x, y, z);
+    m.rotation.x = rx;
+    m.rotation.z = rz;
+    m.castShadow = true;
+    fig.add(m);
+    return m;
+  };
+  part(new THREE.CylinderGeometry(1.55, 2.75, 7.4, 16), 0, 3.7, 0);              // flowing robe
+  part(new THREE.CylinderGeometry(1.7, 2.2, 2.2, 16), 0.18, 5.2, 0.2, 0.06, 0.05); // drape fold
+  part(new THREE.CylinderGeometry(1.0, 1.6, 4.0, 14), 0, 9.2, 0);                // torso
+  const shoulders = part(new THREE.SphereGeometry(1.12, 12, 10), 0, 11.15, 0);
+  shoulders.scale.set(1.35, 0.75, 0.85);
+  part(new THREE.SphereGeometry(0.78, 12, 10), 0, 12.45, 0);                     // head
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.1, 8, 16), copper); // diadem band
+  band.position.set(0, 12.8, 0);
+  band.rotation.x = Math.PI / 2.4;
+  fig.add(band);
+  for (let i = 0; i < 7; i++) { // crown rays fanned ear to ear
+    const a = (i / 6) * Math.PI;
+    const ray = part(new THREE.ConeGeometry(0.13, 1.35, 6), Math.cos(a) * 0.95, 12.9 + Math.sin(a) * 0.8, -0.1);
+    ray.rotation.z = a - Math.PI / 2;
+  }
+  // left arm cradling the tablet — JULY IV MDCCLXXVI
+  part(new THREE.CylinderGeometry(0.3, 0.42, 2.6, 8), -1.15, 10.3, 0.5, 0.35, 0.8);
+  const tablet = part(new THREE.BoxGeometry(1.15, 2.0, 0.34), -1.5, 10.6, 0.75, 0.18, 0.22);
+  tablet.castShadow = true;
+  // raised right arm with flared sleeve, torch, and gilded flame
+  part(new THREE.ConeGeometry(0.85, 1.9, 10), 1.15, 11.7, 0.15, 0, -0.33);       // sleeve flares from the shoulder
+  part(new THREE.CylinderGeometry(0.26, 0.4, 4.6, 10), 1.75, 13.3, 0.25, 0.05, -0.33); // arm
+  part(new THREE.CylinderGeometry(0.13, 0.17, 1.4, 8), 2.5, 15.9, 0.35);         // torch handle
+  const balcony = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.09, 8, 14), copper);
+  balcony.position.set(2.5, 16.5, 0.35);
+  balcony.rotation.x = Math.PI / 2;
+  fig.add(balcony);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.5, 9), gold);
+  flame.position.set(2.5, 17.5, 0.35);
+  flame.castShadow = true;
+  fig.add(flame);
+  fig.position.set(lx, 13.15, lz);
+  fig.rotation.y = Math.PI / 4; // facing the harbor mouth
+  scene.add(fig);
   landmarkInfo('Statue of Liberty', 1886,
     `Bartholdi's colossus was dedicated on October 28, 1886, when Melville was
      67 — in his day her copper still gleamed brown, not green; the patina came
      decades later. The old sailor's harbor of square-riggers now had a new
      light at its gate.`,
-    lx, lz, 32.5, { range: 70, w: 12, h: 30, d: 12 });
+    lx, lz, 33.5, { range: 70, w: 12, h: 31, d: 12 });
 }
 
 // Governors Island with round Castle Williams (1811).
@@ -1921,7 +1958,7 @@ window.addEventListener('pointermove', (e) => {
     stickEl.style.transform = `translate(${(dx / len) * cl}px, ${(dy / len) * cl}px)`;
   } else if (e.pointerId === look.id && state.view === 'street') {
     cam.yaw -= (e.clientX - look.lx) * 0.0055;
-    cam.height = Math.min(13, Math.max(2.4, cam.height + (e.clientY - look.ly) * 0.035));
+    cam.height = Math.min(13, Math.max(1.5, cam.height + (e.clientY - look.ly) * 0.035));
     look.lx = e.clientX;
     look.ly = e.clientY;
     cam.lastDrag = clock.elapsedTime;
@@ -2189,7 +2226,10 @@ function animate() {
     const blocked = camRay.intersectObjects(occluders, false);
     const camDist = blocked.length ? Math.max(2.2, blocked[0].distance - 0.5) : fullDist;
     camPos = head.clone().addScaledVector(toCam, camDist);
-    lookGoal = new THREE.Vector3(player.position.x, player.position.y + 1.7, player.position.z);
+    // dragging the camera below shoulder height cranes the view upward,
+    // so towers and the statue can be seen from their feet
+    const lookUp = Math.max(0, 5 - cam.height) * 4.2;
+    lookGoal = new THREE.Vector3(player.position.x, player.position.y + 1.7 + lookUp, player.position.z);
   }
   const camK = 1 - Math.pow(0.0008, dt);
   camera.position.lerp(camPos, camK);

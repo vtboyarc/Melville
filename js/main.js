@@ -2414,13 +2414,14 @@ document.getElementById('card-close').addEventListener('click', () => {
   }
   if (state.visitedCount === SITES.length && !state.epilogueShown) {
     state.epilogueShown = true;
-    save.epilogueShown = true;
-    persistSave();
     startFinale();
   }
 });
 
 function showEpilogue() {
+  // persisted only now — a reload during the finale lets it play again
+  save.epilogueShown = true;
+  persistSave();
   document.getElementById('epilogue-body').innerHTML = EPILOGUE.map((p) => `<p>${p}</p>`).join('');
   epilogueEl.classList.remove('hidden');
   state.modal = true;

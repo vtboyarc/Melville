@@ -99,6 +99,11 @@ const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerH
 // Third-person follow camera: orbits the player, drag to look around.
 // 'chart' view lifts it high over the island like the old map.
 const cam = { yaw: 0, height: 5, dist: 11, lastDrag: -10 };
+// Chart-view vantage chosen so the full island (z ≈ 96 to -112, x ≈ ±58)
+// fits the 55° frustum even on a portrait phone.
+const CHART_CAM_POS = new THREE.Vector3(0, 205, 95);
+const CHART_LOOK_AT = new THREE.Vector3(0, 0, -12);
+const lookTarget = new THREE.Vector3(0, 1.7, 70); // smoothed camera focus
 const occluders = []; // meshes the camera should not clip through
 
 const hemi = new THREE.HemisphereLight(0xd5e0e8, 0xb09a78, 1.15);
@@ -1419,6 +1424,22 @@ camera.position.set(
 );
 camera.lookAt(player.position);
 
+// Gilded "you are here" marker, shown over Melville in chart view.
+const beacon = new THREE.Group();
+const beaconMat = new THREE.MeshBasicMaterial({ color: 0xc9a227 });
+const beaconCone = new THREE.Mesh(new THREE.ConeGeometry(1.6, 3.6, 4), beaconMat);
+beaconCone.geometry.rotateX(Math.PI); // apex down
+beaconCone.position.y = 7;
+const beaconRing = new THREE.Mesh(
+  new THREE.RingGeometry(2.2, 3, 24),
+  new THREE.MeshBasicMaterial({ color: 0xc9a227, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
+);
+beaconRing.rotation.x = -Math.PI / 2;
+beaconRing.position.y = 0.3;
+beacon.add(beaconCone, beaconRing);
+beacon.visible = false;
+scene.add(beacon);
+
 /* ---------------- input ---------------- */
 
 const keys = {};
@@ -1656,10 +1677,13 @@ function animate() {
   legR.rotation.x = -Math.sin(walkPhase) * swing;
   player.position.y = moving > 0.01 ? Math.abs(Math.sin(walkPhase)) * 0.1 : 0;
 
-  // --- camera: street view orbits behind him; chart view soars like the map ---
-  let camPos;
-  if (state.view === 'chart') {
-    camPos = new THREE.Vector3(player.position.x, 165, player.position.z + 62);
+  // --- camera: street view orbits behind him; chart view frames the whole
+  // island from a fixed vantage, like the 1982 map ---
+  const chartView = state.view === 'chart';
+  let camPos, lookGoal;
+  if (chartView) {
+    camPos = CHART_CAM_POS;
+    lookGoal = CHART_LOOK_AT;
   } else {
     if (moving > 0.01 && t - cam.lastDrag > 2.2) {
       cam.yaw = angleLerp(cam.yaw, Math.atan2(dirX, dirZ) + Math.PI, 1 - Math.pow(0.55, dt));
@@ -1678,9 +1702,12 @@ function animate() {
     const blocked = camRay.intersectObjects(occluders, false);
     const camDist = blocked.length ? Math.max(2.2, blocked[0].distance - 0.5) : fullDist;
     camPos = head.clone().addScaledVector(toCam, camDist);
+    lookGoal = new THREE.Vector3(player.position.x, player.position.y + 1.7, player.position.z);
   }
-  camera.position.lerp(camPos, 1 - Math.pow(0.0008, dt));
-  camera.lookAt(player.position.x, player.position.y + 1.7, player.position.z);
+  const camK = 1 - Math.pow(0.0008, dt);
+  camera.position.lerp(camPos, camK);
+  lookTarget.lerp(lookGoal, camK);
+  camera.lookAt(lookTarget);
   const fv = FOG_VIEWS[state.view];
   scene.fog.near += (fv.near - scene.fog.near) * Math.min(1, dt * 2);
   scene.fog.far += (fv.far - scene.fog.far) * Math.min(1, dt * 2);
@@ -1730,19 +1757,26 @@ function animate() {
   }
 
   // --- markers bob (and swell so they read from the chart view) ---
-  const chartView = state.view === 'chart';
   for (const m of markers) {
-    const ss = chartView ? 10 : 3.6;
+    const ss = chartView ? 12 : 3.6;
     m.sprite.scale.set(ss, ss, 1);
-    m.pin.scale.setScalar(chartView ? 2.4 : 1);
+    m.pin.scale.setScalar(chartView ? 2.8 : 1);
     if (!m.visited) {
       m.pin.position.y = Math.sin(t * 2 + m.phase) * 0.4 + 0.2;
       m.pin.rotation.y = t * 0.8;
-      m.sprite.position.y = (chartView ? 14 : 6.6) + Math.sin(t * 2 + m.phase) * 0.4;
+      m.sprite.position.y = (chartView ? 16 : 6.6) + Math.sin(t * 2 + m.phase) * 0.4;
     } else {
       m.pin.position.y = 0;
-      m.sprite.position.y = chartView ? 14 : 6.6;
+      m.sprite.position.y = chartView ? 16 : 6.6;
     }
+  }
+
+  // --- "you are here" beacon, only meaningful from altitude ---
+  beacon.visible = chartView && state.started;
+  if (beacon.visible) {
+    beacon.position.set(player.position.x, 0, player.position.z);
+    beaconCone.position.y = 7 + Math.sin(t * 2.4) * 0.7;
+    beaconCone.rotation.y = t;
   }
 
   // --- street life ---

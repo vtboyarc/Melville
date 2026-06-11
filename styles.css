@@ -229,6 +229,24 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   border-bottom: 17px solid var(--red);
 }
 
+#view-btn {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  pointer-events: auto;
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  padding: 8px 16px;
+  color: var(--ink);
+  background: rgba(239, 230, 208, 0.92);
+  border: 1.5px solid var(--ink);
+  border-radius: 3px;
+  box-shadow: 2px 2px 0 rgba(43, 38, 32, 0.25);
+}
+#view-btn:hover { transform: none; background: var(--parchment); }
+#view-btn:active { transform: translateY(1px); box-shadow: 1px 1px 0 rgba(43, 38, 32, 0.25); }
+
 /* ---------- visit button / toast ---------- */
 #visit-btn {
   position: fixed;
@@ -354,4 +372,5 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   .card-inner { padding: 30px 20px 24px; }
   #compass { bottom: auto; top: 60px; left: 14px; right: auto; width: 46px; height: 46px; }
   #compass-arrow::before { top: 7px; border-left-width: 5px; border-right-width: 5px; border-bottom-width: 14px; }
+  #view-btn { bottom: 14px; right: 14px; left: auto; font-size: 13px; padding: 7px 12px; }
 }

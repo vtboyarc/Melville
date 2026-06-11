@@ -106,10 +106,10 @@ const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerH
 // Third-person follow camera: orbits the player, drag to look around.
 // 'chart' view lifts it high over the island like the old map.
 const cam = { yaw: 0, height: 5, dist: 11, lastDrag: -10 };
-// Chart-view vantage chosen so the full island (z ≈ 96 to -112, x ≈ ±58)
-// fits the 55° frustum even on a portrait phone.
-const CHART_CAM_POS = new THREE.Vector3(0, 205, 95);
-const CHART_LOOK_AT = new THREE.Vector3(0, 0, -12);
+// Chart-view vantage chosen so the full island plus the harbor landmarks
+// (z ≈ 122 to -112, x ≈ ±58) fit the 55° frustum even on a portrait phone.
+const CHART_CAM_POS = new THREE.Vector3(0, 215, 120);
+const CHART_LOOK_AT = new THREE.Vector3(0, 0, 10);
 const lookTarget = new THREE.Vector3(0, 1.7, 70); // smoothed camera focus
 const occluders = []; // meshes the camera should not clip through
 
@@ -917,33 +917,43 @@ for (const [cx, cz] of [[-26, -56], [16, -16]]) {
    Everything here stood within his lifetime (by September 1891). */
 
 const landmarkLabels = [];
-function landmarkLabel(text, x, y, z) {
+// `range` is how far away the name fades in on foot — harbor landmarks
+// are visible from the Battery, so theirs reach across the water.
+function landmarkLabel(text, x, y, z, range = 34) {
   const cv = document.createElement('canvas');
-  cv.width = 512; cv.height = 80;
-  const ctx = cv.getContext('2d');
-  ctx.font = `500 42px 'EB Garamond', Georgia, serif`;
+  const font = `500 42px 'EB Garamond', Georgia, serif`;
+  let ctx = cv.getContext('2d');
+  ctx.font = font;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '6px';
+  // size the canvas to the text (resizing resets context state)
+  const w = Math.ceil(Math.max(220, (ctx.measureText(text).width || 480) + 48));
+  cv.width = w;
+  cv.height = 80;
+  ctx = cv.getContext('2d');
+  ctx.font = font;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '6px';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '6px';
   ctx.lineWidth = 9;
   ctx.strokeStyle = 'rgba(239,230,208,0.85)';
-  ctx.strokeText(text, 256, 42);
+  ctx.strokeText(text, w / 2, 42);
   ctx.fillStyle = 'rgba(43,38,32,0.95)';
-  ctx.fillText(text, 256, 42);
+  ctx.fillText(text, w / 2, 42);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
   sprite.renderOrder = 5;
   sprite.position.set(x, y, z);
-  sprite.scale.set(13, 2.03, 1);
+  const sh = 2.03, sw = sh * (w / 80);
+  sprite.scale.set(sw, sh, 1);
   scene.add(sprite);
-  landmarkLabels.push({ sprite, x, z });
+  landmarkLabels.push({ sprite, x, z, w: sw, h: sh, range });
   return sprite;
 }
 
 // The Statue of Liberty (1886) — five years old, her copper still brown.
 {
-  const lx = -52, lz = 132;
+  const lx = -48, lz = 116;
   box(11, 1.6, 11, COLORS.outerLand, lx, -0.6, lz, scene, false); // Bedloe's Island
   box(6.5, 1.6, 6.5, 0xa39782, lx, 0.8, lz); // star fort base
   const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.9, 7, 4), lambert(0xb9ad97));
@@ -978,17 +988,17 @@ function landmarkLabel(text, x, y, z) {
   tablet.position.set(lx - 1.5, 14.4, lz);
   tablet.rotation.z = 0.25;
   scene.add(arm, torch, tablet);
-  landmarkLabel('Statue of Liberty · 1886', lx, 24.5, lz);
+  landmarkLabel('Statue of Liberty · 1886', lx, 24.5, lz, 75);
 }
 
 // Governors Island with round Castle Williams (1811).
 {
-  box(13, 1.6, 10, COLORS.outerLand, 44, -0.6, 126, scene, false);
+  box(13, 1.6, 8, COLORS.outerLand, 40, -0.6, 112, scene, false);
   const fort = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3, 2.6, 16), lambert(0xb08d6e));
-  fort.position.set(41, 1.5, 124);
+  fort.position.set(37, 1.5, 111);
   fort.castShadow = true;
   scene.add(fort);
-  landmarkLabel('Governors Island', 44, 7, 126);
+  landmarkLabel('Governors Island', 40, 7, 112, 62);
 }
 
 // City Hall (1812) in its park.
@@ -1571,7 +1581,7 @@ sailShip(-53, -20, 0.9);            // moored at the customs pier
 sailShip(52.5, -88, 0.85);          // moored at the East River pier
 const driftA = sailShip(-62, 70, 1, Math.PI);    // beating up the Hudson
 const driftB = steamShip(40.5, 55, Math.PI);     // steaming up the East River
-const driftC = steamShip(-60, 112, Math.PI / 2); // harbor ferry
+const driftC = steamShip(-60, 104, Math.PI / 2); // harbor ferry
 
 // The whale, off the Battery. Of course there is a whale.
 let whale, spout;
@@ -2056,12 +2066,13 @@ function animate() {
       s = 2.6;
     } else {
       const d = Math.hypot(player.position.x - L.x, player.position.z - L.z);
-      o = d < 18 ? 1 : d > 34 ? 0 : 1 - (d - 18) / 16;
+      const fadeIn = L.range - 16;
+      o = d < fadeIn ? 1 : d > L.range ? 0 : 1 - (d - fadeIn) / 16;
       s = 1;
     }
     L.sprite.material.opacity = o;
     L.sprite.visible = o > 0.02;
-    if (L.sprite.visible) L.sprite.scale.set(13 * s, 2.03 * s, 1);
+    if (L.sprite.visible) L.sprite.scale.set(L.w * s, L.h * s, 1);
   }
 
   // --- street life ---

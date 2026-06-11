@@ -2327,9 +2327,19 @@ function handleTap(cx, cy) {
   if (hits.length) openLandmarkCard(hits[0].object.userData.landmark);
 }
 
+// Ghost-click guard: on touch screens the tap that opens a card is followed
+// by a synthetic click at the same spot a moment later. If the close button
+// happens to appear under the fingertip, that click would shut the card
+// before it could be read — so closes are ignored for an instant after open.
+let modalOpenedAt = 0;
+function ghostClick() {
+  return performance.now() - modalOpenedAt < 350;
+}
+
 function openLandmarkCard(info) {
   if (!info) return;
   state.modal = true;
+  modalOpenedAt = performance.now();
   audio.play('pageTurn');
   document.getElementById('card-num').textContent = '★';
   document.getElementById('card-title').textContent = info.name;
@@ -2381,6 +2391,7 @@ function chartSite(marker, { silent = false } = {}) {
 
 function openCard(marker) {
   state.modal = true;
+  modalOpenedAt = performance.now();
   audio.play('pageTurn');
   const s = marker.site;
   document.getElementById('card-num').textContent = s.num;
@@ -2414,6 +2425,7 @@ function openCard(marker) {
 }
 
 document.getElementById('card-close').addEventListener('click', () => {
+  if (ghostClick()) return;
   cardEl.classList.add('hidden');
   state.modal = false;
   if (pendingPinFx) {
@@ -2430,6 +2442,7 @@ document.getElementById('card-close').addEventListener('click', () => {
 });
 
 function showEpilogue() {
+  modalOpenedAt = performance.now();
   // persisted only now — a reload during the finale lets it play again
   save.epilogueShown = true;
   persistSave();
@@ -2496,6 +2509,7 @@ function updateFinale(dt) {
   }
 }
 document.getElementById('epilogue-close').addEventListener('click', () => {
+  if (ghostClick()) return;
   epilogueEl.classList.add('hidden');
   state.modal = false;
   toast('The island is yours now. Revisit any marker to reread its story.');

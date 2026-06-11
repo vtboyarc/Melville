@@ -215,7 +215,6 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
 #compass-arrow {
   position: absolute;
   inset: 0;
-  transition: transform 0.2s linear;
 }
 #compass-arrow::before {
   content: '';

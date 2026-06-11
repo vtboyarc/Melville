@@ -2092,6 +2092,7 @@ document.getElementById('epilogue-close').addEventListener('click', () => {
 /* ---------------- movement & loop ---------------- */
 
 const SPEED = 7.5;
+let needleAngle = 0; // continuous compass-needle angle, radians
 let walkPhase = 0;
 const clock = new THREE.Clock();
 const camRay = new THREE.Raycaster();
@@ -2231,14 +2232,18 @@ function animate() {
   }
   // Guide needle: the arrow points toward the nearest uncharted site
   // relative to the current view — walk the way it points. (In chart view
-  // the view is north-up, so it doubles as a map bearing.)
+  // the view is north-up, so it doubles as a map bearing.) The angle is
+  // kept continuous and smoothed in JS so the needle never spins the long
+  // way around when the target passes behind the camera.
   if (target) {
     const dx = target.site.pos.x - player.position.x;
     const dz = target.site.pos.z - player.position.z;
     const fx = -Math.sin(effYaw), fz = -Math.cos(effYaw);
     const rx = Math.cos(effYaw), rz = -Math.sin(effYaw);
     const rel = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
-    compassArrow.style.transform = `rotate(${(rel * 180) / Math.PI}deg)`;
+    let dAng = (((rel - needleAngle) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+    needleAngle += dAng * Math.min(1, dt * 9);
+    compassArrow.style.transform = `rotate(${(needleAngle * 180) / Math.PI}deg)`;
     compassArrow.style.opacity = '1';
   } else {
     compassArrow.style.opacity = '0.15';

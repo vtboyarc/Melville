@@ -27,7 +27,8 @@ Own,"* The New York Times, January 19, 1982):
 - **Drag** (mouse, or right thumb on touch screens) to look around; left thumb is the walk joystick
 - **M** (or the Chart View button) toggles a bird's-eye view of the whole island, in the spirit of the original 1982 map
 - The compass points to the nearest uncharted site; the Chart Key tracks progress
-- Charted sites are remembered between visits; the ♪ button mutes the sound
+- Charted sites are remembered between visits ("begin a new chart" on the
+  title screen starts over); the ♪ button mutes the sound
 - Chart all six and the tide turns — watch for it, or skip with any key
 
 ## Landmarks

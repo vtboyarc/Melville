@@ -2244,12 +2244,21 @@ function toast(msg, ms = 4200) {
   }, ms);
 }
 
-// A returning walker is greeted as one.
+// A returning walker is greeted as one — and may tear up the old chart.
 if (save.charted.length > 0) {
   document.getElementById('start-btn').textContent = 'Return ashore';
   const note = document.createElement('p');
   note.className = 'save-note';
-  note.textContent = `${save.charted.length} of ${SITES.length} sites already charted`;
+  note.textContent = `${save.charted.length} of ${SITES.length} sites already charted · `;
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'reset-link';
+  reset.textContent = 'begin a new chart';
+  reset.addEventListener('click', () => {
+    try { localStorage.removeItem(SAVE_KEY); } catch { /* private mode */ }
+    location.reload();
+  });
+  note.appendChild(reset);
   document.getElementById('start-btn').after(note);
 }
 
@@ -2414,7 +2423,9 @@ document.getElementById('card-close').addEventListener('click', () => {
   }
   if (state.visitedCount === SITES.length && !state.epilogueShown) {
     state.epilogueShown = true;
-    startFinale();
+    // wait for the sixth pin's pop, so the player sees it inked
+    // onto the chart before the camera lifts away
+    finaleQueued = true;
   }
 });
 
@@ -2434,6 +2445,7 @@ function showEpilogue() {
 // Liberty while the horns answer and the light goes to gold. Any key or
 // tap skips it; the dusk it leaves behind is permanent.
 let finale = null;
+let finaleQueued = false; // armed on the sixth card-close; lifts off once the pin FX has played
 const LIBERTY_LOOK = new THREE.Vector3(-33, 15, 107);
 function startFinale() {
   if (state.view === 'chart') toggleView();
@@ -2596,6 +2608,10 @@ function animate() {
   // island from a fixed vantage, like the 1982 map ---
   const chartView = state.view === 'chart';
   let camPos, lookGoal;
+  if (finaleQueued && pinFx.length === 0 && !state.modal) {
+    finaleQueued = false;
+    startFinale();
+  }
   if (finale) {
     updateFinale(dt);
   }

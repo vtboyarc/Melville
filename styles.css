@@ -484,6 +484,23 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   font-size: 14px;
   color: var(--ink-soft);
 }
+.reset-link {
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+  font-style: italic;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--red);
+  background: none;
+  border: none;
+  border-bottom: 1px dashed var(--red);
+  border-radius: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+.reset-link:hover { transform: none; color: var(--ink); border-color: var(--ink); }
+.reset-link:active { transform: none; box-shadow: none; }
 
 @media (max-width: 700px) {
   #chart-key { width: 188px; font-size: 12.5px; top: 60px; }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { SITES, EPILOGUE } from './sites.js';
 
 /* ============================================================
@@ -102,6 +103,15 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xe0d7be, 130, 320);
 const FOG_VIEWS = { street: { near: 130, far: 320 }, chart: { near: 600, far: 1300 } };
 
+// Image-based environment so window glass and water pick up reflections.
+try {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
+} catch {
+  // reflections are a nicety; the scene works without them
+}
+
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.4, 1400);
 // Third-person follow camera: orbits the player, drag to look around.
 // 'chart' view lifts it high over the island like the old map.
@@ -125,9 +135,22 @@ sun.shadow.camera.top = 140;
 sun.shadow.camera.bottom = -140;
 sun.shadow.camera.far = 400;
 sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.03;
 sun.shadow.radius = 3;
 scene.add(sun);
 scene.add(sun.target);
+
+// Tight shadow frustum at street level for crisp shadows; wide in chart view.
+function applyShadowFrustum(view) {
+  const c = sun.shadow.camera;
+  if (view === 'chart') {
+    c.left = -100; c.right = 100; c.top = 140; c.bottom = -140;
+  } else {
+    c.left = -55; c.right = 55; c.top = 75; c.bottom = -75;
+  }
+  c.updateProjectionMatrix();
+}
+applyShadowFrustum('street');
 
 const colliders = []; // axis-aligned boxes {x0,x1,z0,z1}
 
@@ -256,12 +279,18 @@ function makeNumberSprite(n) {
 
 /* ---------------- water & land ---------------- */
 
-const waterGeo = new THREE.PlaneGeometry(440, 500, 44, 50);
+const waterGeo = new THREE.PlaneGeometry(440, 500, 60, 68);
 waterGeo.rotateX(-Math.PI / 2);
 const waterBase = waterGeo.attributes.position.array.slice();
 const water = new THREE.Mesh(
   waterGeo,
-  new THREE.MeshPhongMaterial({ color: COLORS.water, shininess: 70, flatShading: true })
+  new THREE.MeshStandardMaterial({
+    color: 0x86aca8,
+    roughness: 0.32,
+    metalness: 0.08,
+    flatShading: true,
+    envMapIntensity: 1.1,
+  })
 );
 water.position.set(0, -0.55, -8);
 water.receiveShadow = true;
@@ -441,11 +470,16 @@ function makeFacadeMaps(p) {
   const bv = document.createElement('canvas'); // bump/height map
   bv.width = CW; bv.height = CH;
   const btx = bv.getContext('2d');
+  const rv = document.createElement('canvas'); // G = roughness, B = metalness
+  rv.width = CW; rv.height = CH;
+  const rtx = rv.getContext('2d');
 
   ctx.fillStyle = p.wall;
   ctx.fillRect(0, 0, CW, CH);
   btx.fillStyle = '#7f7f7f';
   btx.fillRect(0, 0, CW, CH);
+  rtx.fillStyle = 'rgb(0,235,0)'; // masonry: rough, non-metal
+  rtx.fillRect(0, 0, CW, CH);
 
   if (p.style === 'brick') {
     // individual bricks vary in tone
@@ -535,10 +569,15 @@ function makeFacadeMaps(p) {
       glass.addColorStop(1, `rgb(${50 + hue},${60 + hue},${72 + hue})`);
       ctx.fillStyle = glass;
       ctx.fillRect(wx, wy, wx2 - wx, wy2 - wy);
+      rtx.fillStyle = 'rgb(0,55,120)'; // glass: smooth, reflective
+      rtx.fillRect(wx, wy, wx2 - wx, wy2 - wy);
       const v = Math.random();
       if (v < 0.3) { // half-drawn shade
+        const drop = rnd(0.2, 0.55);
         ctx.fillStyle = '#cfc3a6';
-        ctx.fillRect(wx, wy, wx2 - wx, (wy2 - wy) * rnd(0.2, 0.55));
+        ctx.fillRect(wx, wy, wx2 - wx, (wy2 - wy) * drop);
+        rtx.fillStyle = 'rgb(0,215,8)';
+        rtx.fillRect(wx, wy, wx2 - wx, (wy2 - wy) * drop);
       } else if (v < 0.5) { // parted curtains
         ctx.fillStyle = 'rgba(222,214,192,0.85)';
         ctx.fillRect(wx, wy, (wx2 - wx) * 0.22, wy2 - wy);
@@ -578,7 +617,9 @@ function makeFacadeMaps(p) {
   map.anisotropy = 8;
   const bump = new THREE.CanvasTexture(bv);
   bump.wrapS = bump.wrapT = THREE.RepeatWrapping;
-  return { map, bump };
+  const rough = new THREE.CanvasTexture(rv);
+  rough.wrapS = rough.wrapT = THREE.RepeatWrapping;
+  return { map, bump, rough };
 }
 
 const FACADES = [
@@ -589,8 +630,17 @@ const FACADES = [
   { style: 'stone', wall: '#9b9183', joint: 'rgba(0,0,0,0.15)', trim: '#b3a995' },
 ];
 const facadeMats = FACADES.map((p) => {
-  const { map, bump } = makeFacadeMaps(p);
-  return new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: 0.5, roughness: 0.93, metalness: 0 });
+  const { map, bump, rough } = makeFacadeMaps(p);
+  return new THREE.MeshStandardMaterial({
+    map,
+    bumpMap: bump,
+    bumpScale: 0.5,
+    roughnessMap: rough,
+    metalnessMap: rough,
+    roughness: 1,
+    metalness: 1,
+    envMapIntensity: 1.15,
+  });
 });
 
 // Ground floors: paneled doors for the rowhouses, glazed shopfronts with
@@ -605,6 +655,11 @@ function makeGroundMaps(kind) {
   const btx = bv.getContext('2d');
   btx.fillStyle = '#7f7f7f';
   btx.fillRect(0, 0, CW, CH);
+  const rv = document.createElement('canvas'); // G = roughness, B = metalness
+  rv.width = CW; rv.height = CH;
+  const rtx = rv.getContext('2d');
+  rtx.fillStyle = 'rgb(0,235,0)';
+  rtx.fillRect(0, 0, CW, CH);
 
   if (kind === 'row') {
     ctx.fillStyle = '#6e5443'; // rusticated brownstone base
@@ -650,6 +705,8 @@ function makeGroundMaps(kind) {
         ctx.fillRect(ox + 38, 81, 52, 4);
         btx.fillStyle = '#2f2f2f';
         btx.fillRect(ox + 34, 28, 60, 110);
+        rtx.fillStyle = 'rgb(0,55,120)';
+        rtx.fillRect(ox + 38, 32, 52, 102);
       }
     }
   } else {
@@ -680,6 +737,8 @@ function makeGroundMaps(kind) {
       ctx.fillRect(ox + 10, 42, 108, 92);
       btx.fillStyle = '#2a2a2a';
       btx.fillRect(ox + 10, 42, 108, 92);
+      rtx.fillStyle = 'rgb(0,45,130)'; // plate glass: very reflective
+      rtx.fillRect(ox + 10, 42, 108, 92);
       if (b % 2 === 1) { // recessed shop door
         ctx.fillStyle = '#15110d';
         ctx.fillRect(ox + 48, 52, 32, 82);
@@ -703,7 +762,18 @@ function makeGroundMaps(kind) {
   map.anisotropy = 8;
   const bump = new THREE.CanvasTexture(bv);
   bump.wrapS = bump.wrapT = THREE.RepeatWrapping;
-  return new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: 0.5, roughness: 0.9, metalness: 0 });
+  const rough = new THREE.CanvasTexture(rv);
+  rough.wrapS = rough.wrapT = THREE.RepeatWrapping;
+  return new THREE.MeshStandardMaterial({
+    map,
+    bumpMap: bump,
+    bumpScale: 0.5,
+    roughnessMap: rough,
+    metalnessMap: rough,
+    roughness: 1,
+    metalness: 1,
+    envMapIntensity: 1.15,
+  });
 }
 const groundMats = { row: makeGroundMaps('row'), shop: makeGroundMaps('shop') };
 const groundGeos = { row: [], shop: [] };
@@ -1862,6 +1932,8 @@ function endPointer(e) {
     joy.id = null;
     joy.dx = joy.dy = 0;
     joyEl.classList.add('hidden');
+    // a motionless touch in the walk zone is a tap, not a walk
+    if (Math.hypot(e.clientX - joy.ox, e.clientY - joy.oy) < 8) handleTap(e.clientX, e.clientY);
   }
   if (e.pointerId === look.id) {
     look.id = null;
@@ -1890,6 +1962,7 @@ const viewBtn = document.getElementById('view-btn');
 function toggleView() {
   state.view = state.view === 'street' ? 'chart' : 'street';
   viewBtn.textContent = state.view === 'street' ? 'Chart View' : 'Street View';
+  applyShadowFrustum(state.view);
 }
 viewBtn.addEventListener('click', toggleView);
 
@@ -2210,19 +2283,28 @@ function animate() {
     if (L.sprite.visible) L.sprite.scale.set(L.w * s, L.h * s, 1);
   }
 
-  // --- street life ---
+  // --- street life (pedestrians respect walls like everyone else) ---
   for (const w of wanderers) {
-    w.z += w.dir * w.speed * dt;
+    const nz = w.z + w.dir * w.speed * dt;
+    const [cx2, cz2] = collide(w.x, nz);
+    if (Math.abs(cz2 - nz) > 1e-4) {
+      w.dir *= -1; // blocked by a stoop, wagon, or wall — turn back
+    } else {
+      w.z = cz2;
+      w.x = cx2;
+    }
     if (w.z < w.z0) { w.z = w.z0; w.dir = 1; }
     if (w.z > w.z1) { w.z = w.z1; w.dir = -1; }
     w.g.position.set(w.x, Math.abs(Math.sin(t * 7 + w.ph)) * 0.04, w.z);
     w.g.rotation.y = w.dir > 0 ? 0 : Math.PI;
   }
 
-  // --- water ---
+  // --- water: a long swell with wind-chop riding on top ---
   for (let i = 0; i < wPos.count; i++) {
     const x = waterBase[i * 3], z = waterBase[i * 3 + 2];
-    wPos.array[i * 3 + 1] = Math.sin(x * 0.09 + t * 0.9) * Math.cos(z * 0.07 + t * 0.7) * 0.32;
+    wPos.array[i * 3 + 1] =
+      Math.sin(x * 0.09 + t * 0.9) * Math.cos(z * 0.07 + t * 0.7) * 0.28 +
+      Math.sin(x * 0.23 - t * 1.6) * Math.sin(z * 0.19 + t * 1.2) * 0.11;
   }
   wPos.needsUpdate = true;
   water.geometry.computeVertexNormals();

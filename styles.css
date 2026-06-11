@@ -296,7 +296,7 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   background: var(--parchment);
   border: 2px solid var(--ink);
   box-shadow: 6px 6px 0 rgba(43, 38, 32, 0.4);
-  padding: 34px 32px 28px;
+  padding: 20px 32px 28px;
   text-align: center;
   animation: fadein 0.35s ease;
 }
@@ -304,7 +304,7 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
 .card-seal {
   width: 44px;
   height: 44px;
-  margin: -56px auto 10px;
+  margin: 0 auto 12px;
   border-radius: 50%;
   background: var(--red);
   border: 3px solid var(--parchment);

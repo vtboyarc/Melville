@@ -2192,6 +2192,11 @@ const keyList = document.getElementById('key-list');
   const li = document.createElement('li');
   li.id = `key-${s.id}`;
   li.innerHTML = `<span class="knum">${s.num}</span><span>${s.title.replace('—', '·')}</span>`;
+  // the key promises "tap any red pin ... here or from the chart view"
+  li.addEventListener('click', () => {
+    if (state.modal) return;
+    openCard(markers.find((m) => m.site.id === s.id));
+  });
   keyList.appendChild(li);
 });
 

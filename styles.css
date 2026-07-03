@@ -171,7 +171,10 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   padding: 3px 0;
   line-height: 1.25;
   color: var(--ink-soft);
+  cursor: pointer;
 }
+#key-list li:hover { color: var(--ink); }
+#key-list li:hover span:last-of-type { text-decoration: underline; text-underline-offset: 2px; }
 #key-list li .knum {
   flex: none;
   width: 17px;

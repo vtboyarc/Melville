@@ -26,10 +26,11 @@ function makeNoise(seconds) {
   return buf;
 }
 
-function noiseLoop() {
+// a source over the shared noise buffer — looped for ambience, one-shot for FX
+function noiseSource(loop = false) {
   const src = ctx.createBufferSource();
   src.buffer = noiseBuf;
-  src.loop = true;
+  src.loop = loop;
   return src;
 }
 
@@ -45,7 +46,7 @@ function lfo(freq, depth, param) {
 
 function startAmbience() {
   // wind: filtered noise that swells and dies like weather, always on
-  const wind = noiseLoop();
+  const wind = noiseSource(true);
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 360;
@@ -57,7 +58,7 @@ function startAmbience() {
   lfo(0.19, 0.018, wg.gain);
 
   // surf: band of wash that rises as the walker nears the water
-  const surf = noiseLoop();
+  const surf = noiseSource(true);
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass';
   bp.frequency.value = 620;
@@ -117,8 +118,7 @@ function gullCry(gain) {
 // one footfall: a short noise tick, boomier on the pier planks
 function step(wood) {
   const t0 = ctx.currentTime;
-  const src = ctx.createBufferSource();
-  src.buffer = noiseBuf;
+  const src = noiseSource();
   src.playbackRate.value = 0.85 + Math.random() * 0.3;
   const f = ctx.createBiquadFilter();
   if (wood) {
@@ -155,7 +155,7 @@ function whistle(gain) {
     o.start(t0);
     o.stop(t0 + 1.35);
   }
-  const n = noiseLoop();
+  const n = noiseSource(true);
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass';
   bp.frequency.value = 520;
@@ -194,8 +194,7 @@ function horn(freq, gain, when, dur) {
 // the soft riffle of paper as a card opens
 function pageTurn() {
   const t0 = ctx.currentTime;
-  const src = ctx.createBufferSource();
-  src.buffer = noiseBuf;
+  const src = noiseSource();
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass';
   bp.frequency.setValueAtTime(700, t0);

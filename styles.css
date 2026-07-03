@@ -1,10 +1,8 @@
 :root {
   --parchment: #efe6d0;
-  --parchment-dark: #e3d7bb;
   --ink: #2b2620;
   --ink-soft: #5a5142;
   --red: #b23a2c;
-  --teal: #9dbdb9;
   --gold: #c9a227;
 }
 
@@ -211,6 +209,7 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
   border-radius: 50%;
   background: rgba(239, 230, 208, 0.9);
   box-shadow: 2px 2px 0 rgba(43, 38, 32, 0.25);
+  pointer-events: auto; /* the HUD ignores the pointer, but the compass has a tooltip */
 }
 #compass-arrow {
   position: absolute;

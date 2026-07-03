@@ -10,17 +10,13 @@ import { audio } from './audio.js';
    ============================================================ */
 
 const COLORS = {
-  parchment: 0xefe6d0,
   islandTop: 0xece2c8,
   islandSide: 0xb3a482,
   outerLand: 0xe2d8bc,
-  street: 0xccbf9e,
   park: 0xa9b58a,
   parkTree: 0x76885f,
-  water: 0x9dbdb9,
   ink: 0x2b2620,
   red: 0xb23a2c,
-  redDark: 0x7d2418,
   brick: 0x9a6b54,
   gold: 0xd4af37,
   wood: 0x8a6f4d,
@@ -90,9 +86,7 @@ const scene = new THREE.Scene();
 const SKY_STOPS = [0, 0.5, 0.75, 1];
 const SKY_DAY = ['#93aabd', '#c3c8bb', '#e3d8be', '#ecdfc4'];
 const SKY_DUSK = ['#8d7d93', '#c98e5f', '#e8c193', '#ecd3a6'];
-const skyCanvas = document.createElement('canvas');
-skyCanvas.width = 16;
-skyCanvas.height = 256;
+const [skyCanvas, skyCtx] = canvas2d(16, 256);
 const skyTex = new THREE.CanvasTexture(skyCanvas);
 skyTex.colorSpace = THREE.SRGBColorSpace;
 scene.background = skyTex;
@@ -104,11 +98,10 @@ function lerpHexCss(a, b, t) {
 }
 
 function setSky(warmth) {
-  const c = skyCanvas.getContext('2d');
-  const g = c.createLinearGradient(0, 0, 0, 256);
+  const g = skyCtx.createLinearGradient(0, 0, 0, 256);
   SKY_STOPS.forEach((s, i) => g.addColorStop(s, lerpHexCss(SKY_DAY[i], SKY_DUSK[i], warmth)));
-  c.fillStyle = g;
-  c.fillRect(0, 0, 16, 256);
+  skyCtx.fillStyle = g;
+  skyCtx.fillRect(0, 0, 16, 256);
   skyTex.needsUpdate = true;
 }
 setSky(0);
@@ -141,10 +134,6 @@ const sun = new THREE.DirectionalLight(0xffe0ac, 2.6);
 sun.position.set(70, 100, 45);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -100;
-sun.shadow.camera.right = 100;
-sun.shadow.camera.top = 140;
-sun.shadow.camera.bottom = -140;
 sun.shadow.camera.far = 400;
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.03;
@@ -196,6 +185,13 @@ function inClearZone(x, z) {
 
 function rnd(a, b) { return a + Math.random() * (b - a); }
 
+function canvas2d(w, h) {
+  const cv = document.createElement('canvas');
+  cv.width = w;
+  cv.height = h;
+  return [cv, cv.getContext('2d')];
+}
+
 function distToSegment(px, pz, ax, az, bx, bz) {
   const dx = bx - ax, dz = bz - az;
   const len2 = dx * dx + dz * dz;
@@ -241,9 +237,7 @@ function cylBetween(p1, p2, r, color, parent = scene) {
 }
 
 function makeTextTexture(text, { size = 72, color = 'rgba(43,38,32,0.55)', italic = true } = {}) {
-  const cv = document.createElement('canvas');
-  cv.width = 1024; cv.height = 144;
-  const ctx = cv.getContext('2d');
+  const [cv, ctx] = canvas2d(1024, 144);
   ctx.font = `${italic ? 'italic ' : ''}600 ${size}px 'EB Garamond', Georgia, serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -267,9 +261,7 @@ function waterLabel(text, x, z, rotY = 0, width = 42) {
 }
 
 function makeNumberSprite(n) {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 128;
-  const ctx = cv.getContext('2d');
+  const [cv, ctx] = canvas2d(128, 128);
   ctx.beginPath();
   ctx.arc(64, 64, 52, 0, Math.PI * 2);
   ctx.fillStyle = '#b23a2c';
@@ -345,9 +337,7 @@ waterLabel('THE BATTERY', -2, 108, 0, 30);
 
 // Belgian-block (cobblestone) paving, drawn once and tiled.
 function makeCobbleTexture() {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 128;
-  const ctx = cv.getContext('2d');
+  const [cv, ctx] = canvas2d(128, 128);
   ctx.fillStyle = '#c5b896';
   ctx.fillRect(0, 0, 128, 128);
   const rowH = 16;
@@ -374,9 +364,9 @@ function scaleUV(geo, ru, rv) {
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * ru, uv.getY(i) * rv);
 }
 
-function streetPlane(len, wide) {
-  const geo = new THREE.PlaneGeometry(len, wide);
-  scaleUV(geo, len / 3.2, wide / 3.2);
+function streetPlane(len, wide, alongX = true) {
+  const geo = alongX ? new THREE.PlaneGeometry(len, wide) : new THREE.PlaneGeometry(wide, len);
+  scaleUV(geo, (alongX ? len : wide) / 3.2, (alongX ? wide : len) / 3.2);
   geo.rotateX(-Math.PI / 2);
   const m = new THREE.Mesh(geo, streetMat);
   m.receiveShadow = true;
@@ -403,11 +393,7 @@ for (const x of AVENUES) {
     if (pointInPoly(x, z)) { zmin = Math.min(zmin, z); zmax = Math.max(zmax, z); }
   }
   if (zmax - zmin > 6) {
-    const geo = new THREE.PlaneGeometry(2.8, zmax - zmin - 2);
-    scaleUV(geo, 2.8 / 3.2, (zmax - zmin - 2) / 3.2);
-    geo.rotateX(-Math.PI / 2);
-    const m = new THREE.Mesh(geo, streetMat);
-    m.receiveShadow = true;
+    const m = streetPlane(zmax - zmin - 2, 2.8, false);
     m.position.set(x, 0.05, (zmin + zmax) / 2);
     scene.add(m);
     aveSegs.push({ x, z0: zmin + 1, z1: zmax - 1 });
@@ -416,9 +402,7 @@ for (const x of AVENUES) {
 
 // Bluestone sidewalks flanking every paved street and avenue.
 {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 64;
-  const ctx = cv.getContext('2d');
+  const [cv, ctx] = canvas2d(64, 64);
   ctx.fillStyle = '#979c94';
   ctx.fillRect(0, 0, 64, 64);
   ctx.fillStyle = 'rgba(0,0,0,0.18)';
@@ -476,15 +460,9 @@ const TEX_FLOORS = 4;    // so window variation doesn't visibly tile
 
 function makeFacadeMaps(p) {
   const CW = 128 * TEX_BAYS, CH = 160 * TEX_FLOORS;
-  const cv = document.createElement('canvas');
-  cv.width = CW; cv.height = CH;
-  const ctx = cv.getContext('2d');
-  const bv = document.createElement('canvas'); // bump/height map
-  bv.width = CW; bv.height = CH;
-  const btx = bv.getContext('2d');
-  const rv = document.createElement('canvas'); // G = roughness, B = metalness
-  rv.width = CW; rv.height = CH;
-  const rtx = rv.getContext('2d');
+  const [cv, ctx] = canvas2d(CW, CH);
+  const [bv, btx] = canvas2d(CW, CH); // bump/height map
+  const [rv, rtx] = canvas2d(CW, CH); // G = roughness, B = metalness
 
   ctx.fillStyle = p.wall;
   ctx.fillRect(0, 0, CW, CH);
@@ -641,8 +619,8 @@ const FACADES = [
   { style: 'castiron', wall: '#cfc2a4', joint: 'rgba(0,0,0,0.2)', trim: '#bdb091' },
   { style: 'stone', wall: '#9b9183', joint: 'rgba(0,0,0,0.15)', trim: '#b3a995' },
 ];
-const facadeMats = FACADES.map((p) => {
-  const { map, bump, rough } = makeFacadeMaps(p);
+// masonry PBR setup shared by the facades and the ground floors
+function masonryMat({ map, bump, rough }) {
   return new THREE.MeshStandardMaterial({
     map,
     bumpMap: bump,
@@ -653,23 +631,18 @@ const facadeMats = FACADES.map((p) => {
     metalness: 1,
     envMapIntensity: 1.15,
   });
-});
+}
+const facadeMats = FACADES.map((p) => masonryMat(makeFacadeMaps(p)));
 
 // Ground floors: paneled doors for the rowhouses, glazed shopfronts with
 // painted sign-boards for the commercial streets.
 function makeGroundMaps(kind) {
   const CW = 512, CH = 160;
-  const cv = document.createElement('canvas');
-  cv.width = CW; cv.height = CH;
-  const ctx = cv.getContext('2d');
-  const bv = document.createElement('canvas');
-  bv.width = CW; bv.height = CH;
-  const btx = bv.getContext('2d');
+  const [cv, ctx] = canvas2d(CW, CH);
+  const [bv, btx] = canvas2d(CW, CH);
   btx.fillStyle = '#7f7f7f';
   btx.fillRect(0, 0, CW, CH);
-  const rv = document.createElement('canvas'); // G = roughness, B = metalness
-  rv.width = CW; rv.height = CH;
-  const rtx = rv.getContext('2d');
+  const [rv, rtx] = canvas2d(CW, CH); // G = roughness, B = metalness
   rtx.fillStyle = 'rgb(0,235,0)';
   rtx.fillRect(0, 0, CW, CH);
 
@@ -776,25 +749,14 @@ function makeGroundMaps(kind) {
   bump.wrapS = bump.wrapT = THREE.RepeatWrapping;
   const rough = new THREE.CanvasTexture(rv);
   rough.wrapS = rough.wrapT = THREE.RepeatWrapping;
-  return new THREE.MeshStandardMaterial({
-    map,
-    bumpMap: bump,
-    bumpScale: 0.5,
-    roughnessMap: rough,
-    metalnessMap: rough,
-    roughness: 1,
-    metalness: 1,
-    envMapIntensity: 1.15,
-  });
+  return { map, bump, rough };
 }
-const groundMats = { row: makeGroundMaps('row'), shop: makeGroundMaps('shop') };
+const groundMats = { row: masonryMat(makeGroundMaps('row')), shop: masonryMat(makeGroundMaps('shop')) };
 const groundGeos = { row: [], shop: [] };
 
 // striped canvas awnings
 function makeAwningMat(c1, c2) {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 64;
-  const ctx = cv.getContext('2d');
+  const [cv, ctx] = canvas2d(64, 64);
   for (let x = 0; x < 64; x += 16) {
     ctx.fillStyle = c1;
     ctx.fillRect(x, 0, 8, 64);
@@ -953,12 +915,12 @@ for (let k = 0; k < 150; k++) {
 // Trinity Church (its spire ruled the skyline until 1890).
 {
   const tx = -15, tz = 40;
-  const dark = lambert(0x6b5240);
-  const nave = box(4, 9, 6.5, 0x6b5240, tx, 4.5, tz + 1.5);
+  const brownstone = 0x6b5240;
+  const nave = box(4, 9, 6.5, brownstone, tx, 4.5, tz + 1.5);
   nave.castShadow = true;
-  const towerT = box(2.6, 17, 2.6, 0x6b5240, tx, 8.5, tz - 2.6);
+  const towerT = box(2.6, 17, 2.6, brownstone, tx, 8.5, tz - 2.6);
   towerT.castShadow = true;
-  const spireT = new THREE.Mesh(new THREE.ConeGeometry(1.9, 9, 8), dark);
+  const spireT = new THREE.Mesh(new THREE.ConeGeometry(1.9, 9, 8), lambert(brownstone));
   spireT.position.set(tx, 21.5, tz - 2.6);
   spireT.castShadow = true;
   scene.add(spireT);
@@ -1155,12 +1117,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 
 // City Hall (1812) in its park.
 {
-  const geo = new THREE.CircleGeometry(4.5, 18);
-  geo.rotateX(-Math.PI / 2);
-  const green = new THREE.Mesh(geo, lambert(COLORS.park));
-  green.receiveShadow = true;
-  green.position.set(2, 0.1, 44);
-  scene.add(green);
+  parkGreen(new THREE.CircleGeometry(4.5, 18), 2, 44);
   tree(-1, 43, 0.8);
   tree(5, 45, 0.9);
   const hall = box(10, 10, 6, 0xded6c2, 2, 5, 52);
@@ -1293,12 +1250,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 
 // Union Square (1839), with the equestrian Washington of 1856.
 {
-  const geo = new THREE.PlaneGeometry(16, 9);
-  geo.rotateX(-Math.PI / 2);
-  const green = new THREE.Mesh(geo, lambert(COLORS.park));
-  green.receiveShadow = true;
-  green.position.set(-2, 0.1, -40);
-  scene.add(green);
+  parkGreen(new THREE.PlaneGeometry(16, 9), -2, -40);
   for (let i = 0; i < 7; i++) {
     const tx2 = -9 + Math.random() * 14, tz2 = -43.6 + Math.random() * 7.2;
     if (Math.hypot(tx2 + 2, tz2 + 40) > 2.6) tree(tx2, tz2, 0.7 + Math.random() * 0.5);
@@ -1542,6 +1494,15 @@ for (const [wx, wz] of [[-13, -44], [13, -20], [-1, -64]]) {
 
 /* ---------------- parks & trees ---------------- */
 
+// a lawn: any flat geometry laid down in park green
+function parkGreen(geo, x, z) {
+  geo.rotateX(-Math.PI / 2);
+  const m = new THREE.Mesh(geo, lambert(COLORS.park));
+  m.receiveShadow = true;
+  m.position.set(x, 0.1, z);
+  scene.add(m);
+}
+
 function tree(x, z, s = 1) {
   const g = new THREE.Group();
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14 * s, 0.2 * s, 1.1 * s, 5), lambert(COLORS.woodDark));
@@ -1557,12 +1518,7 @@ function tree(x, z, s = 1) {
 
 // Madison Square Park
 {
-  const geo = new THREE.PlaneGeometry(20, 11);
-  geo.rotateX(-Math.PI / 2);
-  const m = new THREE.Mesh(geo, lambert(COLORS.park));
-  m.receiveShadow = true;
-  m.position.set(-1, 0.1, -74);
-  scene.add(m);
+  parkGreen(new THREE.PlaneGeometry(20, 11), -1, -74);
   for (let i = 0; i < 11; i++) {
     const tx = -10 + Math.random() * 18;
     const tz = -78.6 + Math.random() * 9;
@@ -1571,12 +1527,7 @@ function tree(x, z, s = 1) {
 }
 // Battery green
 {
-  const geo = new THREE.CircleGeometry(7, 20);
-  geo.rotateX(-Math.PI / 2);
-  const m = new THREE.Mesh(geo, lambert(COLORS.park));
-  m.receiveShadow = true;
-  m.position.set(-2, 0.1, 88);
-  scene.add(m);
+  parkGreen(new THREE.CircleGeometry(7, 20), -2, 88);
   for (let i = 0; i < 6; i++) {
     const a = Math.random() * Math.PI * 2, r = 2.5 + Math.random() * 4;
     const tx = -2 + Math.cos(a) * r, tz = 88 + Math.sin(a) * r;
@@ -1794,9 +1745,13 @@ function steamShip(x, z, rotY = 0) {
 
 sailShip(-53, -20, 0.9);            // moored at the customs pier
 sailShip(52.5, -88, 0.85);          // moored at the East River pier
-const driftA = sailShip(-62, 70, 1, Math.PI);    // beating up the Hudson
-const driftB = steamShip(40.5, 55, Math.PI);     // steaming up the East River
-const driftC = steamShip(-60, 98, Math.PI / 2); // harbor ferry, hugging the Battery
+// Ships under way: each drifts along one axis, then wraps around for
+// another pass. The steamers trail coal smoke.
+const drifters = [
+  { obj: sailShip(-62, 70, 1, Math.PI), axis: 'z', vel: -3.2, limit: -115, reset: 95 },        // beating up the Hudson
+  { obj: steamShip(40.5, 55, Math.PI), axis: 'z', vel: -4, limit: -38, reset: 62, smokes: true },   // steaming up the East River
+  { obj: steamShip(-60, 98, Math.PI / 2), axis: 'x', vel: 4.5, limit: 110, reset: -110, smokes: true }, // harbor ferry, hugging the Battery
+];
 
 // The whale, off the Battery. Of course there is a whale.
 let whale, spout;
@@ -1859,9 +1814,7 @@ const SUN_DIR_DAY = new THREE.Vector3(70, 62, 45).normalize();
 const SUN_DIR_DUSK = new THREE.Vector3(70, 30, 45).normalize();
 const sunDirCur = SUN_DIR_DAY.clone();
 const sunSprite = (() => {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 256;
-  const c = cv.getContext('2d');
+  const [cv, c] = canvas2d(256, 256);
   const g = c.createRadialGradient(128, 128, 0, 128, 128, 128);
   g.addColorStop(0, 'rgba(255,248,225,1)');
   g.addColorStop(0.12, 'rgba(255,243,210,0.9)');
@@ -1884,10 +1837,7 @@ const sunSprite = (() => {
 const clouds = [];
 {
   const cloudTexture = () => {
-    const cv = document.createElement('canvas');
-    cv.width = 256;
-    cv.height = 128;
-    const c = cv.getContext('2d');
+    const [cv, c] = canvas2d(256, 128);
     for (let i = 0; i < 9; i++) {
       const x = 40 + Math.random() * 176, y = 48 + Math.random() * 38, r = 22 + Math.random() * 30;
       const g = c.createRadialGradient(x, y, 0, x, y, r);
@@ -1930,9 +1880,7 @@ const smoke = (() => {
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('aSize', new THREE.BufferAttribute(aSize, 1));
   geo.setAttribute('aAlpha', new THREE.BufferAttribute(aAlpha, 1));
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 64;
-  const c = cv.getContext('2d');
+  const [cv, c] = canvas2d(64, 64);
   const grad = c.createRadialGradient(32, 32, 0, 32, 32, 32);
   grad.addColorStop(0, 'rgba(255,255,255,0.9)');
   grad.addColorStop(0.5, 'rgba(255,255,255,0.4)');
@@ -2006,7 +1954,13 @@ const smoke = (() => {
   }
   return { emit, update };
 })();
-let smokeTrainT = 0, smokeShipBT = 0, smokeShipCT = 0;
+// every smoking prop: emit cadence and the funnel tip in local coordinates
+const smokeSources = [
+  { obj: train, period: 0.3, tipY: 9.95, tipZ: 6, vy: 2.4, t: 0 },
+  ...drifters
+    .filter((d) => d.smokes)
+    .map((d) => ({ obj: d.obj, period: 0.45, tipY: 5.1, tipZ: 0.5, vy: 1.7, t: 0 })),
+];
 
 // "The Tide Turns": once the chart is complete the whole island settles
 // into a permanent golden hour. warmth runs 0 (day) to 1 (dusk).
@@ -2035,7 +1989,6 @@ function applyDusk(w) {
 
 const markers = SITES.map((site, i) => {
   const g = new THREE.Group();
-  const baseY = 0; // both piers have decks near y 0
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(1.7, 2.3, 28),
     new THREE.MeshBasicMaterial({ color: COLORS.red, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
@@ -2054,9 +2007,13 @@ const markers = SITES.map((site, i) => {
   const pin = new THREE.Group();
   pin.add(cone, ball);
   g.add(ring, pin, sprite);
-  g.position.set(site.pos.x, baseY, site.pos.z);
+  g.position.set(site.pos.x, 0, site.pos.z); // both piers have decks near y 0
   scene.add(g);
-  return { site, g, pin, ring, sprite, pinMat, phase: i * 1.1, visited: false };
+  return {
+    site,
+    shortTitle: site.title.split('—')[0].trim(), // for the visit prompt
+    g, pin, ring, sprite, pinMat, phase: i * 1.1, visited: false,
+  };
 });
 
 /* ---------------- the man himself ---------------- */
@@ -2211,6 +2168,12 @@ const visitBtn = document.getElementById('visit-btn');
 const visitLabel = document.getElementById('visit-label');
 const toastEl = document.getElementById('toast');
 const cardEl = document.getElementById('card');
+const cardNum = document.getElementById('card-num');
+const cardTitle = document.getElementById('card-title');
+const cardDates = document.getElementById('card-dates');
+const cardMedia = document.getElementById('card-media');
+const cardBody = document.getElementById('card-body');
+const cardArtifact = document.getElementById('card-artifact');
 const epilogueEl = document.getElementById('epilogue');
 const progressEl = document.getElementById('progress');
 const compassEl = document.getElementById('compass');
@@ -2336,19 +2299,25 @@ function ghostClick() {
   return performance.now() - modalOpenedAt < 350;
 }
 
-function openLandmarkCard(info) {
-  if (!info) return;
+// Modal-open bookkeeping shared by every card: the ghost-click timestamp,
+// the ducked ambience, the page-turn, and the header fields.
+function beginCard(num, title, dates) {
   state.modal = true;
   modalOpenedAt = performance.now();
   audio.play('pageTurn');
-  document.getElementById('card-num').textContent = '★';
-  document.getElementById('card-title').textContent = info.name;
-  document.getElementById('card-dates').textContent = info.year
+  cardNum.textContent = num;
+  cardTitle.textContent = title;
+  cardDates.textContent = dates;
+  cardMedia.innerHTML = '';
+}
+
+function openLandmarkCard(info) {
+  if (!info) return;
+  beginCard('★', info.name, info.year
     ? `${info.year} · a landmark of Melville’s city`
-    : 'a landmark of Melville’s city';
-  document.getElementById('card-media').innerHTML = '';
-  document.getElementById('card-body').innerHTML = `<p>${info.blurb}</p>`;
-  document.getElementById('card-artifact').style.display = 'none';
+    : 'a landmark of Melville’s city');
+  cardBody.innerHTML = `<p>${info.blurb}</p>`;
+  cardArtifact.style.display = 'none';
   cardEl.classList.remove('hidden');
 }
 
@@ -2390,15 +2359,8 @@ function chartSite(marker, { silent = false } = {}) {
 }
 
 function openCard(marker) {
-  state.modal = true;
-  modalOpenedAt = performance.now();
-  audio.play('pageTurn');
   const s = marker.site;
-  document.getElementById('card-num').textContent = s.num;
-  document.getElementById('card-title').textContent = s.title;
-  document.getElementById('card-dates').textContent = s.dates;
-  const mediaEl = document.getElementById('card-media');
-  mediaEl.innerHTML = '';
+  beginCard(s.num, s.title, s.dates);
   if (s.image) {
     const fig = document.createElement('figure');
     fig.className = 'card-figure';
@@ -2410,16 +2372,15 @@ function openCard(marker) {
     const cap = document.createElement('figcaption');
     cap.textContent = s.image.caption.replace(/\s+/g, ' ').trim();
     fig.append(img, cap);
-    mediaEl.appendChild(fig);
+    cardMedia.appendChild(fig);
   }
-  document.getElementById('card-body').innerHTML = s.body.map((p) => `<p>${p}</p>`).join('');
-  const artifactEl = document.getElementById('card-artifact');
-  artifactEl.style.display = '';
+  cardBody.innerHTML = s.body.map((p) => `<p>${p}</p>`).join('');
+  cardArtifact.style.display = '';
   const firstVisit = !marker.visited;
-  artifactEl.innerHTML = firstVisit
+  cardArtifact.innerHTML = firstVisit
     ? `<b>Artifact found:</b> ${s.artifact}`
     : `<b>Collected:</b> ${s.artifact}`;
-  artifactEl.classList.toggle('stamped', firstVisit);
+  cardArtifact.classList.toggle('stamped', firstVisit);
   cardEl.classList.remove('hidden');
   if (firstVisit) chartSite(marker);
 }
@@ -2474,7 +2435,11 @@ function startFinale() {
       new THREE.Vector3(8, 55, 55),
       new THREE.Vector3(-10, 26, 86),
     ]),
-    horns: [[2, 82, 0.4], [5, 116, 0.28], [8.2, 96, 0.34]],
+    horns: [
+      { at: 2, freq: 82, gain: 0.4 },
+      { at: 5, freq: 116, gain: 0.28 },
+      { at: 8.2, freq: 96, gain: 0.34 },
+    ],
     gullsAt: 3.5,
   };
 }
@@ -2493,8 +2458,8 @@ function smoothstep01(x) {
 function updateFinale(dt) {
   finale.t += dt;
   applyDusk(Math.min(1, finale.t / 8));
-  while (finale.horns.length && finale.t >= finale.horns[0][0]) {
-    const [, freq, gain] = finale.horns.shift();
+  while (finale.horns.length && finale.t >= finale.horns[0].at) {
+    const { freq, gain } = finale.horns.shift();
     audio.play('horn', { freq, gain });
   }
   if (finale.gullsAt && finale.t >= finale.gullsAt) {
@@ -2544,6 +2509,11 @@ function trainWhistle() {
 }
 const clock = new THREE.Clock();
 const camRay = new THREE.Raycaster();
+// scratch vectors reused every frame, so the camera path allocates nothing
+const _camPos = new THREE.Vector3();
+const _lookGoal = new THREE.Vector3();
+const _head = new THREE.Vector3();
+const _toCam = new THREE.Vector3();
 
 function moveInput() {
   let mx = 0, mz = 0;
@@ -2588,15 +2558,16 @@ function animate() {
 
   // --- player (movement is camera-relative; chart view is north-up) ---
   const effYaw = state.view === 'chart' ? 0 : cam.yaw;
+  // the camera's ground-plane basis, shared by movement and the compass
+  const fwdX = -Math.sin(effYaw), fwdZ = -Math.cos(effYaw);
+  const rightX = Math.cos(effYaw), rightZ = -Math.sin(effYaw);
   let moving = 0, dirX = 0, dirZ = 0;
   if (state.started && !state.modal) {
     const [mx, mz] = moveInput();
     moving = Math.hypot(mx, mz);
     if (moving > 0.01) {
-      const fx = -Math.sin(effYaw), fz = -Math.cos(effYaw);   // camera forward
-      const rx = Math.cos(effYaw), rz = -Math.sin(effYaw);    // camera right
-      dirX = rx * mx + fx * -mz;
-      dirZ = rz * mx + fz * -mz;
+      dirX = rightX * mx + fwdX * -mz;
+      dirZ = rightZ * mx + fwdZ * -mz;
       let nx = player.position.x + dirX * SPEED * dt;
       let nz = player.position.z + dirZ * SPEED * dt;
       if (!isWalkable(nx, player.position.z)) nx = player.position.x;
@@ -2621,7 +2592,6 @@ function animate() {
   // --- camera: street view orbits behind him; chart view frames the whole
   // island from a fixed vantage, like the 1982 map ---
   const chartView = state.view === 'chart';
-  let camPos, lookGoal;
   if (finaleQueued && pinFx.length === 0 && !state.modal) {
     finaleQueued = false;
     startFinale();
@@ -2632,41 +2602,40 @@ function animate() {
   if (finale) {
     // the long crane shot out to the harbor; settles 3 s before the card
     const u = smoothstep01(Math.min(1, finale.t / (finale.dur - 3)));
-    camPos = finale.curve.getPoint(u);
+    finale.curve.getPoint(u, _camPos);
     const lookK = smoothstep01(Math.min(1, finale.t / 5));
-    lookGoal = new THREE.Vector3(player.position.x, 1.9, player.position.z).lerp(LIBERTY_LOOK, lookK);
+    _lookGoal.set(player.position.x, 1.9, player.position.z).lerp(LIBERTY_LOOK, lookK);
   } else if (chartView) {
-    camPos = CHART_CAM_POS;
-    lookGoal = CHART_LOOK_AT;
+    _camPos.copy(CHART_CAM_POS);
+    _lookGoal.copy(CHART_LOOK_AT);
   } else {
     if (moving > 0.01 && t - cam.lastDrag > 2.2) {
       cam.yaw = angleLerp(cam.yaw, Math.atan2(dirX, dirZ) + Math.PI, 1 - Math.pow(0.55, dt));
     }
-    const head = new THREE.Vector3(player.position.x, 1.9, player.position.z);
-    const desired = new THREE.Vector3(
+    _head.set(player.position.x, 1.9, player.position.z);
+    _toCam.set(
       player.position.x + Math.sin(cam.yaw) * cam.dist,
       cam.height,
       player.position.z + Math.cos(cam.yaw) * cam.dist
-    );
-    const toCam = desired.clone().sub(head);
-    const fullDist = toCam.length();
-    toCam.normalize();
-    camRay.set(head, toCam);
+    ).sub(_head);
+    const fullDist = _toCam.length();
+    _toCam.normalize();
+    camRay.set(_head, _toCam);
     camRay.far = fullDist;
     const blocked = camRay.intersectObjects(occluders, false);
     const targetDist = blocked.length ? Math.max(2.2, blocked[0].distance - 0.5) : fullDist;
     // ease the occlusion pull-in: snap in quickly, recover gently, never pop
     const k = targetDist < cam.smoothDist ? Math.min(1, dt * 14) : Math.min(1, dt * 3);
     cam.smoothDist += (targetDist - cam.smoothDist) * k;
-    camPos = head.clone().addScaledVector(toCam, cam.smoothDist);
+    _camPos.copy(_head).addScaledVector(_toCam, cam.smoothDist);
     // only near the very bottom of the drag range does the view crane up
     // (quadratic, so it eases in) — normal heights behave as before
     const lowness = Math.max(0, 2.8 - cam.height);
-    lookGoal = new THREE.Vector3(player.position.x, player.position.y + 1.7 + lowness * lowness * 4, player.position.z);
+    _lookGoal.set(player.position.x, player.position.y + 1.7 + lowness * lowness * 4, player.position.z);
   }
   const camK = 1 - Math.pow(0.0008, dt);
-  camera.position.lerp(camPos, camK);
-  lookTarget.lerp(lookGoal, camK);
+  camera.position.lerp(_camPos, camK);
+  lookTarget.lerp(_lookGoal, camK);
   camera.lookAt(lookTarget);
   const fv = FOG_VIEWS[state.view];
   scene.fog.near += (fv.near - scene.fog.near) * Math.min(1, dt * 2);
@@ -2684,40 +2653,28 @@ function animate() {
     cl.sp.material.opacity += ((chartView ? 0 : cl.peak) - cl.sp.material.opacity) * Math.min(1, dt * 2);
   }
 
-  // --- proximity / visit prompt ---
-  let near = null, nearD = 8;
+  // --- proximity: one pass finds the nearest site (visit prompt) and the
+  // nearest uncharted site (compass target) ---
+  let near = null, nearD = 8, target = null, targetD = Infinity;
   for (const m of markers) {
     const d = Math.hypot(player.position.x - m.site.pos.x, player.position.z - m.site.pos.z);
     if (d < nearD) { near = m; nearD = d; }
+    if (!m.visited && d < targetD) { target = m; targetD = d; }
   }
-  if (near !== state.nearSite) {
-    state.nearSite = near;
-    if (near && state.started && !state.modal) {
-      visitLabel.textContent = `${near.visited ? 'Revisit' : 'Visit'}: ${near.site.title.split('—')[0].trim()}`;
-      visitBtn.classList.remove('hidden');
-      if (!visitPulsed) {
-        // the very first prompt glows so nobody walks past it
-        visitPulsed = true;
-        visitBtn.classList.add('pulse');
-        setTimeout(() => visitBtn.classList.remove('pulse'), 4400);
-      }
-    } else {
-      visitBtn.classList.add('hidden');
-    }
-  }
-  if (state.modal && !visitBtn.classList.contains('hidden')) visitBtn.classList.add('hidden');
-  if (!state.modal && state.nearSite && state.started && visitBtn.classList.contains('hidden')) {
-    const n = state.nearSite;
-    visitLabel.textContent = `${n.visited ? 'Revisit' : 'Visit'}: ${n.site.title.split('—')[0].trim()}`;
-    visitBtn.classList.remove('hidden');
-  }
+  state.nearSite = near;
 
-  // --- compass to nearest uncharted site ---
-  let target = null, best = Infinity;
-  for (const m of markers) {
-    if (m.visited) continue;
-    const d = Math.hypot(player.position.x - m.site.pos.x, player.position.z - m.site.pos.z);
-    if (d < best) { best = d; target = m; }
+  // --- visit prompt, recomputed from proximity + modal state each frame ---
+  const promptOn = !!near && state.started && !state.modal;
+  visitBtn.classList.toggle('hidden', !promptOn);
+  if (promptOn) {
+    const label = `${near.visited ? 'Revisit' : 'Visit'}: ${near.shortTitle}`;
+    if (visitLabel.textContent !== label) visitLabel.textContent = label;
+    if (!visitPulsed) {
+      // the very first prompt glows so nobody walks past it
+      visitPulsed = true;
+      visitBtn.classList.add('pulse');
+      setTimeout(() => visitBtn.classList.remove('pulse'), 4400);
+    }
   }
   // Guide needle: the arrow points toward the nearest uncharted site
   // relative to the current view — walk the way it points. (In chart view
@@ -2727,11 +2684,8 @@ function animate() {
   if (target) {
     const dx = target.site.pos.x - player.position.x;
     const dz = target.site.pos.z - player.position.z;
-    const fx = -Math.sin(effYaw), fz = -Math.cos(effYaw);
-    const rx = Math.cos(effYaw), rz = -Math.sin(effYaw);
-    const rel = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
-    let dAng = (((rel - needleAngle) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
-    needleAngle += dAng * Math.min(1, dt * 9);
+    const rel = Math.atan2(dx * rightX + dz * rightZ, dx * fwdX + dz * fwdZ);
+    needleAngle = angleLerp(needleAngle, rel, Math.min(1, dt * 9));
     compassArrow.style.transform = `rotate(${(needleAngle * 180) / Math.PI}deg)`;
     compassArrow.style.opacity = '1';
   } else if (!compassEl.classList.contains('compass-done')) {
@@ -2759,17 +2713,19 @@ function animate() {
   }
 
   // --- markers bob (and swell so they read from the chart view) ---
+  const spriteScale = chartView ? 12 : 3.6;
+  const spriteY = chartView ? 16 : 6.6;
   for (const m of markers) {
-    const ss = chartView ? 12 : 3.6;
-    m.sprite.scale.set(ss, ss, 1);
+    m.sprite.scale.set(spriteScale, spriteScale, 1);
     m.pin.scale.setScalar((chartView ? 2.8 : 1) * (m.fxScale || 1));
     if (!m.visited) {
-      m.pin.position.y = Math.sin(t * 2 + m.phase) * 0.4 + 0.2;
+      const bob = Math.sin(t * 2 + m.phase) * 0.4;
+      m.pin.position.y = bob + 0.2;
       m.pin.rotation.y = t * 0.8;
-      m.sprite.position.y = (chartView ? 16 : 6.6) + Math.sin(t * 2 + m.phase) * 0.4;
+      m.sprite.position.y = spriteY + bob;
     } else {
       m.pin.position.y = 0;
-      m.sprite.position.y = chartView ? 16 : 6.6;
+      m.sprite.position.y = spriteY;
     }
   }
 
@@ -2822,31 +2778,29 @@ function animate() {
       Math.sin(x * 0.23 - t * 1.6) * Math.sin(z * 0.19 + t * 1.2) * 0.11;
   }
   wPos.needsUpdate = true;
-  water.geometry.computeVertexNormals();
+  // no normal recompute: the material is flat-shaded, so the shader derives
+  // face normals from position derivatives and never reads the attribute
 
   // --- moving props ---
   for (const b of bobbers) {
     b.obj.position.y = Math.sin(t * 0.9 + b.phase) * 0.18;
     b.obj.rotation.z = Math.sin(t * 0.7 + b.phase) * 0.02;
   }
-  driftA.position.z -= dt * 3.2;
-  if (driftA.position.z < -115) driftA.position.z = 95;
-  driftB.position.z -= dt * 4;
-  if (driftB.position.z < -38) driftB.position.z = 62;
-  driftC.position.x += dt * 4.5;
-  if (driftC.position.x > 110) driftC.position.x = -110;
+  for (const d of drifters) {
+    const p = d.obj.position;
+    p[d.axis] += d.vel * dt;
+    if (d.vel < 0 ? p[d.axis] < d.limit : p[d.axis] > d.limit) p[d.axis] = d.reset;
+  }
 
   train.position.z += trainDir * dt * 9;
   if (train.position.z < -103) { train.position.z = -103; trainDir = 1; train.rotation.y = Math.PI; trainWhistle(); }
   if (train.position.z > -8) { train.position.z = -8; trainDir = -1; train.rotation.y = 0; trainWhistle(); }
 
   // --- coal smoke from the locomotive and the two moving steamers ---
-  smokeTrainT += dt;
-  while (smokeTrainT > 0.3) { smokeTrainT -= 0.3; smoke.emit(train, 0, 9.95, 6, 2.4); }
-  smokeShipBT += dt;
-  while (smokeShipBT > 0.45) { smokeShipBT -= 0.45; smoke.emit(driftB, 0, 5.1, 0.5, 1.7); }
-  smokeShipCT += dt;
-  while (smokeShipCT > 0.45) { smokeShipCT -= 0.45; smoke.emit(driftC, 0, 5.1, 0.5, 1.7); }
+  for (const s of smokeSources) {
+    s.t += dt;
+    while (s.t > s.period) { s.t -= s.period; smoke.emit(s.obj, 0, s.tipY, s.tipZ, s.vy); }
+  }
   smoke.update(dt);
 
   diana.rotation.y = t * 0.4;

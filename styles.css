@@ -167,14 +167,30 @@ button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
 #key-list li {
   display: flex;
   align-items: baseline;
-  gap: 8px;
   padding: 3px 0;
   line-height: 1.25;
   color: var(--ink-soft);
+}
+#key-list .key-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+  text-align: left;
+  color: inherit;
   cursor: pointer;
 }
-#key-list li:hover { color: var(--ink); }
-#key-list li:hover span:last-of-type { text-decoration: underline; text-underline-offset: 2px; }
+#key-list .key-entry:hover { transform: none; color: var(--ink); }
+#key-list .key-entry:hover span:last-of-type { text-decoration: underline; text-underline-offset: 2px; }
+#key-list .key-entry:active { transform: none; box-shadow: none; }
+#key-list .key-entry:focus-visible { outline: 1.5px solid var(--ink); outline-offset: 2px; }
 #key-list li .knum {
   flex: none;
   width: 17px;

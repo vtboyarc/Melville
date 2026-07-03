@@ -2191,17 +2191,7 @@ const keyList = document.getElementById('key-list');
 [...SITES].sort((a, b) => a.num - b.num).forEach((s) => {
   const li = document.createElement('li');
   li.id = `key-${s.id}`;
-  // a real button, so the entry is reachable and usable by keyboard too
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'key-entry';
-  btn.innerHTML = `<span class="knum">${s.num}</span><span>${s.title.replace('—', '·')}</span>`;
-  // the key promises "tap any red pin ... here or from the chart view"
-  btn.addEventListener('click', () => {
-    if (state.modal) return;
-    openCard(markers.find((m) => m.site.id === s.id));
-  });
-  li.appendChild(btn);
+  li.innerHTML = `<span class="knum">${s.num}</span><span>${s.title.replace('—', '·')}</span>`;
   keyList.appendChild(li);
 });
 

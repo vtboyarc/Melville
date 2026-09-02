@@ -310,30 +310,43 @@ function makeNumberSprite(n) {
 // The harbor: a long swell with wind-chop riding on top. The same wave
 // runs in the water's vertex shader (so the plane can be fine and wide
 // for free) and here in JS, so the ships ride the swell they float on.
-const WATER_Y = -0.55, WATER_Z = -8;
+// Three terms: the harbor swell, the wind-chop across it, and a fine
+// ripple. Crests reach about 0.65 above the mean, which keeps them just
+// under the island's top at y = 0. Keep the GLSL below in step with this.
+const WATER_Y = -0.75, WATER_Z = -8;
 function waveHeight(wx, wz, t) {
   const x = wx, z = wz - WATER_Z; // the plane's local frame
   return WATER_Y +
-    Math.sin(x * 0.09 + t * 0.9) * Math.cos(z * 0.07 + t * 0.7) * 0.28 +
-    Math.sin(x * 0.23 - t * 1.6) * Math.sin(z * 0.19 + t * 1.2) * 0.11;
+    Math.sin(x * 0.09 + t * 0.9) * Math.cos(z * 0.07 + t * 0.7) * 0.42 +
+    Math.sin(x * 0.23 - t * 1.6) * Math.sin(z * 0.19 + t * 1.2) * 0.16 +
+    Math.sin(x * 0.41 + z * 0.37 + t * 2.1) * 0.07;
 }
 const waterUniforms = { uTime: { value: 0 } };
-const waterGeo = new THREE.PlaneGeometry(600, 640, 160, 170);
+const waterGeo = new THREE.PlaneGeometry(600, 640, 240, 256);
 waterGeo.rotateX(-Math.PI / 2);
 const waterMat = new THREE.MeshStandardMaterial({
-  color: 0x86aca8,
-  roughness: 0.32,
-  metalness: 0.08,
+  color: 0x4a7377, // the grey-green of the harbor, not a swimming pool
+  roughness: 0.34,
+  metalness: 0.05,
   flatShading: true, // normals come from screen derivatives, so displacement needs no recompute
-  envMapIntensity: 1.1,
+  envMapIntensity: 0.55, // the room reflection washes the water pale if left strong
 });
 waterMat.onBeforeCompile = (shader) => {
   shader.uniforms.uTime = waterUniforms.uTime;
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nuniform float uTime;')
+    .replace('#include <common>', '#include <common>\nuniform float uTime;\nvarying float vCrest;')
     .replace('#include <begin_vertex>', `#include <begin_vertex>
-      transformed.y += sin(transformed.x * 0.09 + uTime * 0.9) * cos(transformed.z * 0.07 + uTime * 0.7) * 0.28
-                     + sin(transformed.x * 0.23 - uTime * 1.6) * sin(transformed.z * 0.19 + uTime * 1.2) * 0.11;`);
+      float wave = sin(transformed.x * 0.09 + uTime * 0.9) * cos(transformed.z * 0.07 + uTime * 0.7) * 0.42
+                 + sin(transformed.x * 0.23 - uTime * 1.6) * sin(transformed.z * 0.19 + uTime * 1.2) * 0.16
+                 + sin(transformed.x * 0.41 + transformed.z * 0.37 + uTime * 2.1) * 0.07;
+      transformed.y += wave;
+      vCrest = wave / 0.65;`);
+  // crests run paler and troughs deeper, so the swell reads even where
+  // the light is flat
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying float vCrest;')
+    .replace('#include <color_fragment>', `#include <color_fragment>
+      diffuseColor.rgb *= 0.9 + 0.16 * vCrest;`);
 };
 const water = new THREE.Mesh(waterGeo, waterMat);
 water.position.set(0, WATER_Y, WATER_Z);
@@ -364,7 +377,7 @@ const foam = (() => {
   c.fillRect(0, 0, 128, 64);
   c.fillStyle = 'rgba(255,255,255,0.55)';
   for (let i = 0; i < 40; i++) c.fillRect(Math.random() * 128, 20 + Math.random() * 44, 2 + Math.random() * 10, 1.5);
-  c.fillStyle = 'rgba(134,172,168,0.4)'; // gaps, in the water's own colour
+  c.fillStyle = 'rgba(74,115,119,0.4)'; // gaps, in the water's own colour
   for (let i = 0; i < 30; i++) c.fillRect(Math.random() * 128, 34 + Math.random() * 30, 3 + Math.random() * 8, 2);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;

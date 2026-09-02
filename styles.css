@@ -136,6 +136,7 @@ button:disabled:hover, button:disabled:active { transform: none; box-shadow: 0 3
   color: var(--ink);
   text-shadow: 0 1px 0 rgba(239, 230, 208, 0.9);
 }
+#hud.chart #hud-top { opacity: 0.45; transition: opacity 0.4s ease; }
 #progress {
   font-style: italic;
   font-size: 14px;

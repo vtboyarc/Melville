@@ -1106,7 +1106,7 @@ const landmarkLabels = [];
 // `range` is how far away the name fades in on foot — harbor landmarks
 // are visible from the Battery, so theirs reach across the water.
 // Drawn at high resolution so chart view stays crisp.
-function landmarkLabel(text, x, y, z, range = 34) {
+function landmarkLabel(text, x, y, z, range = 34, chart = {}) {
   const cv = document.createElement('canvas');
   const font = `500 84px 'EB Garamond', Georgia, serif`;
   let ctx = cv.getContext('2d');
@@ -1141,7 +1141,9 @@ function landmarkLabel(text, x, y, z, range = 34) {
   const sh = 2.03, sw = sh * (w / 160);
   sprite.scale.set(sw, sh, 1);
   scene.add(sprite);
-  landmarkLabels.push({ sprite, x, z, w: sw, h: sh, range });
+  // chart.dx / chart.dz nudge the label in chart view so the downtown
+  // cluster does not pile up; on foot every label sits over its landmark
+  landmarkLabels.push({ sprite, x, z, w: sw, h: sh, range, cdx: chart.dx || 0, cdz: chart.dz || 0 });
   return sprite;
 }
 
@@ -1149,8 +1151,8 @@ function landmarkLabel(text, x, y, z, range = 34) {
 // opens a short history card. The label sprite and an invisible volume
 // around the structure both catch the tap.
 const tapTargets = [];
-function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 0, d = 8 } = {}) {
-  const sprite = landmarkLabel(year ? `${name} · ${year}` : name, x, labelY, z, range);
+function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 0, d = 8, chart = {} } = {}) {
+  const sprite = landmarkLabel(year ? `${name} · ${year}` : name, x, labelY, z, range, chart);
   const info = { name, year, blurb };
   sprite.userData.landmark = info;
   tapTargets.push(sprite);
@@ -1321,7 +1323,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
      The Greek Revival building itself served as the Custom House until
      1862 — the very service in which Melville later spent nineteen years —
      and then as the Sub-Treasury, its vaults full of gold.`,
-    fx, fz, 12, { w: 8.4, h: 9.5, d: 7 });
+    fx, fz, 12, { w: 8.4, h: 9.5, d: 7, chart: { dz: 2 } });
 }
 
 // The Tribune Building (1875) — tall brick, clock tower over Park Row.
@@ -1344,7 +1346,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
      Tribune was one of the first elevator towers in the world — at 260 feet
      it loomed over Newspaper Row, where every great daily watched City Hall
      across the park.`,
-    tx, tz, 31, { w: 5.5, h: 29, d: 5.5 });
+    tx, tz, 31, { w: 5.5, h: 29, d: 5.5, chart: { dx: 8 } });
 }
 
 // The Western Union Telegraph Building (1875) on lower Broadway.
@@ -1366,7 +1368,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
      Tribune, the city's first true skyscraper. Every day at noon a time-ball
      dropped from its mast so the harbor's ships — and the customs men on
      the piers — could set their chronometers.`,
-    wx, wz, 24.5, { w: 6, h: 22, d: 5.5 });
+    wx, wz, 24.5, { w: 6, h: 22, d: 5.5, chart: { dx: -6, dz: 4 } });
 }
 
 // Cooper Union (1859), in whose Great Hall Lincoln spoke in 1860.
@@ -1439,7 +1441,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
      passenger elevator in any hotel. Princes, presidents, and the
      Republican bosses of the Gilded Age held court a block from Melville's
      front door.`,
-    hx, hz, 20, { w: 7.5, h: 17, d: 6 });
+    hx, hz, 20, { w: 7.5, h: 17, d: 6, chart: { dx: -6 } });
 }
 
 // Info for the landmarks that were already on the island.
@@ -1447,7 +1449,7 @@ landmarkInfo('Trinity Church', 1846,
   `Richard Upjohn's brownstone Gothic spire was the tallest thing in New
    York for most of Melville's life — mariners steered by it, and its bells
    rang over Wall Street. Alexander Hamilton lies in its churchyard.`,
-  -15, 40, 28, { w: 7, h: 26, d: 12 });
+  -15, 40, 28, { w: 7, h: 26, d: 12, chart: { dx: -4 } });
 landmarkInfo('Brooklyn Bridge', 1883,
   `The Roeblings' “eighth wonder” opened in May 1883, its towers taller
    than anything but Trinity's spire. The old sailor saw the age of sail
@@ -2190,6 +2192,16 @@ legL.position.set(-0.24, 0.95, 0);
 legR.position.set(0.24, 0.95, 0);
 legL.castShadow = legR.castShadow = true;
 player.add(legL, legR);
+// coat sleeves, hinged at the shoulder so they swing with the stride
+const armGeo = new THREE.BoxGeometry(0.22, 0.95, 0.22);
+armGeo.translate(0, -0.42, 0);
+const armL = new THREE.Mesh(armGeo, lambert(0x33302c));
+const armR = armL.clone();
+armL.position.set(-0.74, 2.35, 0);
+armR.position.set(0.74, 2.35, 0);
+armL.castShadow = armR.castShadow = true;
+player.add(armL, armR);
+player.rotation.order = 'YXZ'; // heading first, so the walking lean stays in his own frame
 player.scale.setScalar(0.58); // a man among five-storey buildings
 player.position.set(0, 0, 70);
 player.rotation.y = Math.PI; // facing north, up the island
@@ -2298,6 +2310,11 @@ function endPointer(e) {
 }
 window.addEventListener('pointerup', endPointer);
 window.addEventListener('pointercancel', endPointer);
+// a mouse wheel brings the camera in close or lets it hang back
+window.addEventListener('wheel', (e) => {
+  if (!state.started || state.modal || state.view !== 'street' || onUi(e)) return;
+  cam.dist = Math.min(16, Math.max(6, cam.dist + e.deltaY * 0.012));
+}, { passive: true });
 
 /* ---------------- UI ---------------- */
 
@@ -2335,6 +2352,7 @@ const viewBtn = document.getElementById('view-btn');
 function toggleView() {
   state.view = state.view === 'street' ? 'chart' : 'street';
   viewBtn.textContent = state.view === 'street' ? 'Chart View' : 'Street View';
+  hudEl.classList.toggle('chart', state.view === 'chart'); // the title steps back from the map
   applyShadowFrustum(state.view);
 }
 viewBtn.addEventListener('click', toggleView);
@@ -2644,6 +2662,7 @@ document.getElementById('epilogue-close').addEventListener('click', () => {
 /* ---------------- movement & loop ---------------- */
 
 const SPEED = 7.5;
+const vel = { x: 0, z: 0 }; // the walker's eased velocity, as a fraction of SPEED
 let needleAngle = 0; // continuous compass-needle angle, radians
 let walkPhase = 0;
 let lastStepSign = true; // footstep trigger: sign of the leg swing
@@ -2722,27 +2741,37 @@ function animate() {
   // the camera's ground-plane basis, shared by movement and the compass
   const fwdX = -Math.sin(effYaw), fwdZ = -Math.cos(effYaw);
   const rightX = Math.cos(effYaw), rightZ = -Math.sin(effYaw);
-  let moving = 0, dirX = 0, dirZ = 0;
+  // the input is a goal velocity; the walker eases into his stride and
+  // takes a short step to stop, rather than snapping between the two
+  let goalX = 0, goalZ = 0;
   if (state.started && !state.modal) {
     const [mx, mz] = moveInput();
-    moving = Math.hypot(mx, mz);
-    if (moving > 0.01) {
-      dirX = rightX * mx + fwdX * -mz;
-      dirZ = rightZ * mx + fwdZ * -mz;
-      let nx = player.position.x + dirX * SPEED * dt;
-      let nz = player.position.z + dirZ * SPEED * dt;
-      if (!isWalkable(nx, player.position.z)) nx = player.position.x;
-      if (!isWalkable(nx, nz)) nz = player.position.z;
-      [nx, nz] = collide(nx, nz);
-      if (isWalkable(nx, nz)) player.position.set(nx, 0, nz);
-      player.rotation.y = angleLerp(player.rotation.y, Math.atan2(dirX, dirZ), 1 - Math.pow(0.00001, dt));
-    }
+    goalX = rightX * mx + fwdX * -mz;
+    goalZ = rightZ * mx + fwdZ * -mz;
+  }
+  const wantsToMove = Math.hypot(goalX, goalZ) > 0.01;
+  const ease = 1 - Math.pow(wantsToMove ? 0.0001 : 0.000001, dt);
+  vel.x += (goalX - vel.x) * ease;
+  vel.z += (goalZ - vel.z) * ease;
+  let moving = Math.hypot(vel.x, vel.z);
+  if (moving < 0.01) { vel.x = vel.z = 0; moving = 0; }
+  if (moving > 0) {
+    let nx = player.position.x + vel.x * SPEED * dt;
+    let nz = player.position.z + vel.z * SPEED * dt;
+    if (!isWalkable(nx, player.position.z)) nx = player.position.x;
+    if (!isWalkable(nx, nz)) nz = player.position.z;
+    [nx, nz] = collide(nx, nz);
+    if (isWalkable(nx, nz)) player.position.set(nx, 0, nz);
+    player.rotation.y = angleLerp(player.rotation.y, Math.atan2(vel.x, vel.z), 1 - Math.pow(0.00001, dt));
   }
   walkPhase += dt * (4 + moving * 7);
-  const swing = moving > 0.01 ? 0.62 : 0;
+  const swing = moving > 0.01 ? 0.62 * Math.min(1, moving * 1.5) : 0;
   legL.rotation.x = Math.sin(walkPhase) * swing;
   legR.rotation.x = -Math.sin(walkPhase) * swing;
-  player.position.y = moving > 0.01 ? Math.abs(Math.sin(walkPhase)) * 0.1 : 0;
+  armL.rotation.x = -Math.sin(walkPhase) * swing * 0.7; // arms swing against the legs
+  armR.rotation.x = Math.sin(walkPhase) * swing * 0.7;
+  player.rotation.x = moving * 0.07; // a slight lean into the walk
+  player.position.y = moving > 0.01 ? Math.abs(Math.sin(walkPhase)) * 0.1 * Math.min(1, moving * 1.5) : 0;
   // each leg-swing crossing is a footfall — planks on the piers, stone ashore
   const stepSign = Math.sin(walkPhase) >= 0;
   if (moving > 0.01 && stepSign !== lastStepSign) {
@@ -2770,8 +2799,8 @@ function animate() {
     _camPos.copy(CHART_CAM_POS);
     _lookGoal.copy(CHART_LOOK_AT);
   } else {
-    if (moving > 0.01 && t - cam.lastDrag > 2.2) {
-      cam.yaw = angleLerp(cam.yaw, Math.atan2(dirX, dirZ) + Math.PI, 1 - Math.pow(0.55, dt));
+    if (moving > 0.05 && t - cam.lastDrag > 2.2) {
+      cam.yaw = angleLerp(cam.yaw, Math.atan2(vel.x, vel.z) + Math.PI, 1 - Math.pow(0.55, dt));
     }
     _head.set(player.position.x, 1.9, player.position.z);
     _toCam.set(
@@ -2903,12 +2932,16 @@ function animate() {
     let o, s;
     if (chartView) {
       o = 0.95;
-      s = 2.6;
+      s = 2.0;
+      L.sprite.position.x = L.x + L.cdx;
+      L.sprite.position.z = L.z + L.cdz;
     } else {
       const d = Math.hypot(player.position.x - L.x, player.position.z - L.z);
       const fadeIn = L.range - 16;
       o = d < fadeIn ? 1 : d > L.range ? 0 : 1 - (d - fadeIn) / 16;
       s = 1;
+      L.sprite.position.x = L.x;
+      L.sprite.position.z = L.z;
     }
     L.sprite.material.opacity = o;
     L.sprite.visible = o > 0.02;

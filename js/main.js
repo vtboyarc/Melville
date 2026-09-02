@@ -448,6 +448,8 @@ for (const x of AVENUES) {
     for (const [z0, z1] of cutSpan(zmin + 1, zmax - 1, x, false)) addAvenue(x, z0, z1);
   }
 }
+// Third Avenue itself, under the El: the pillars stand in the roadway.
+addAvenue(EL_X, -108, -1);
 
 // Bluestone sidewalks flanking every paved street and avenue.
 {
@@ -667,7 +669,12 @@ const FACADES = [
   { style: 'brick', wall: '#a8643f', joint: 'rgba(0,0,0,0.14)', trim: '#d8cbab' },
   { style: 'castiron', wall: '#cfc2a4', joint: 'rgba(0,0,0,0.2)', trim: '#bdb091' },
   { style: 'stone', wall: '#9b9183', joint: 'rgba(0,0,0,0.15)', trim: '#b3a995' },
+  // the last two are reserved for landmarks: Stanford White's yellow brick
+  // and the white marble of the hotel and City Hall
+  { style: 'brick', wall: '#c8a583', joint: 'rgba(0,0,0,0.11)', trim: '#e4d3b2' },
+  { style: 'stone', wall: '#d9d2c0', joint: 'rgba(0,0,0,0.09)', trim: '#c9c1ad' },
 ];
+const ROW_FACADES = 5; // how many of the FACADES the ordinary streets draw from
 // masonry PBR setup shared by the facades and the ground floors
 function masonryMat({ map, bump, rough }) {
   return new THREE.MeshStandardMaterial({
@@ -822,6 +829,8 @@ const awnGeos = [[], []];
 const facadeGeos = FACADES.map(() => []);
 const trimGeos = [];  // cornices, chimneys, stoops — one dark material
 const tankGeos = [];  // rooftop water tanks
+const ROOF_TONES = [0x57514a, 0x7f7466, 0x6b6a66]; // tar, tin, slate
+const roofGeos = ROOF_TONES.map(() => []);
 
 // Scale a box's UVs so the texture shows `bays` bays wide and `floors`
 // floors high; faces order is +x, -x, +y, -y, +z, -z (4 verts each).
@@ -888,10 +897,14 @@ function addBuilding(x, z, w, d, floors, pi, { stoop = false, tank = 'auto', gro
     aw.translate(x, 2.5, z + (d / 2 + 0.42) * (face === 'north' ? -1 : 1));
     awnGeos[Math.random() < 0.5 ? 0 : 1].push(aw);
   }
-  // heavy Italianate cornice; its top doubles as the (hidden) roof
+  // heavy Italianate cornice, and above it the roof itself — tar, tin or
+  // slate — so the city reads as a roofscape from the chart
   const cornice = new THREE.BoxGeometry(w + 0.4, 0.6, d + 0.4);
   cornice.translate(x, h + 0.1, z);
   trimGeos.push(cornice);
+  const roof = new THREE.BoxGeometry(w - 0.2, 0.16, d - 0.2);
+  roof.translate(x, h + 0.45, z);
+  roofGeos[Math.floor(Math.random() * roofGeos.length)].push(roof);
   // chimneys
   const nCh = Math.floor(Math.random() * 3);
   for (let c = 0; c < nCh; c++) {
@@ -937,7 +950,7 @@ for (let ai = 0; ai < AVENUES.length - 1; ai++) {
         if (cursor + w > x1) w = x1 - cursor;
         if (w < 1.6) break;
         const floors = 3 + Math.floor(Math.random() * 3); // 3–5 storeys
-        const pi = Math.floor(Math.random() * FACADES.length);
+        const pi = Math.floor(Math.random() * ROW_FACADES);
         // corner lots get shops; mid-block keeps its stoops and parlors
         const corner = cursor <= x0 + 0.01 || cursor + w >= x1 - 1.6;
         addBuilding(cursor + w / 2, zc, w - 0.15, depth, floors, pi === 3 ? 0 : pi, {
@@ -957,8 +970,32 @@ for (let k = 0; k < 150; k++) {
   const w = 2.6 + Math.random() * 2.2;
   const d = 2.4 + Math.random() * 1.8;
   const floors = 3 + Math.floor(Math.random() * 3);
-  const pi = Math.random() < 0.3 ? 3 : Math.floor(Math.random() * FACADES.length);
+  const pi = Math.random() < 0.3 ? 3 : Math.floor(Math.random() * ROW_FACADES);
   addBuilding(x, z, w, d, floors, pi, { ground: Math.random() < 0.65 ? 'shop' : 'row' });
+}
+
+// A windowed landmark block: the facade texture on the upper floors and,
+// optionally, a shopfront or rowhouse ground floor. Both meshes occlude the
+// camera; the upper one is returned so callers can hang ornament off it.
+function landmarkBox(w, floors, d, pi, x, z, { ground = null, yBase = 0 } = {}) {
+  const baysW = Math.max(1, Math.round(w / BAY_W));
+  const baysD = Math.max(1, Math.round(d / BAY_W));
+  let y = yBase, upper = floors;
+  if (ground) {
+    const g = uvBox(new THREE.BoxGeometry(w, FLOOR_H, d), baysW, baysD, TEX_FLOORS);
+    g.translate(x, y + FLOOR_H / 2, z);
+    const gm = new THREE.Mesh(g, groundMats[ground]);
+    gm.castShadow = gm.receiveShadow = true;
+    scene.add(gm);
+    occluders.push(gm);
+    y += FLOOR_H;
+    upper -= 1;
+  }
+  const m = new THREE.Mesh(facadeBox(x, z, w, d, upper, y), facadeMats[pi]);
+  m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+  occluders.push(m);
+  return m;
 }
 
 // Trinity Church (its spire ruled the skyline until 1890).
@@ -1174,23 +1211,21 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   parkGreen(new THREE.CircleGeometry(4.5, 18), 2, 44);
   tree(-1, 43, 0.8);
   tree(5, 45, 0.9);
-  const hall = box(10, 10, 6, 0xded6c2, 2, 5, 52);
-  hall.castShadow = true;
-  box(10.6, 0.6, 6.6, 0xc7bda5, 2, 10.3, 52);
-  box(3.6, 3, 3.6, 0xded6c2, 2, 11.8, 52); // attic pavilion
+  landmarkBox(10, 3, 6, 6, 2, 52); // marble, three tall storeys
+  box(10.6, 0.6, 6.6, 0xc7bda5, 2, 9.3, 52);
+  box(3.6, 3, 3.6, 0xded6c2, 2, 10.8, 52); // attic pavilion
   const drum = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 2.2, 10), lambert(0xd5ccb6));
-  drum.position.set(2, 14.4, 52);
+  drum.position.set(2, 13.4, 52);
   const cupola = new THREE.Mesh(new THREE.SphereGeometry(1.3, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), lambert(0xb3a479));
-  cupola.position.set(2, 15.5, 52);
+  cupola.position.set(2, 14.5, 52);
   scene.add(drum, cupola);
   addCollider(2, 52, 10, 6);
-  occluders.push(hall);
   landmarkInfo('City Hall', 1812,
     `The marble French-Renaissance City Hall opened in 1812, seven years
      before Melville was born around the corner on Pearl Street. In 1865
      Lincoln lay in state under its rotunda while the city he had carried
      filed past.`,
-    2, 52, 19, { w: 10, h: 17, d: 6 });
+    2, 52, 18, { w: 10, h: 16, d: 6 });
 }
 
 // Federal Hall (1842), Washington's statue (1883) on its steps.
@@ -1236,21 +1271,18 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 // The Tribune Building (1875) — tall brick, clock tower over Park Row.
 {
   const tx = 12.5, tz = 44;
-  const tower = box(5, 18, 5, 0x7e4034, tx, 9, tz);
-  tower.castShadow = true;
+  landmarkBox(5, 6, 5, 1, tx, tz, { ground: 'shop' }); // red brick, six storeys
   box(5.5, 0.6, 5.5, 0x5e3026, tx, 18.3, tz);
-  const upper = box(2.8, 7, 2.8, 0x7e4034, tx, 22.1, tz);
-  upper.castShadow = true;
+  landmarkBox(2.8, 2, 2.8, 1, tx, tz, { yBase: 18.6 }); // the clock tower
   const clock = new THREE.Mesh(new THREE.CircleGeometry(0.7, 14), new THREE.MeshBasicMaterial({ color: 0xefe6d0 }));
   clock.position.set(tx, 23.8, tz + 1.42);
   scene.add(clock);
   const cap = new THREE.Mesh(new THREE.ConeGeometry(2.2, 3.2, 4), lambert(0x4a3a30));
   cap.rotation.y = Math.PI / 4;
-  cap.position.set(tx, 27.2, tz);
+  cap.position.set(tx, 26.2, tz);
   cap.castShadow = true;
   scene.add(cap);
   addCollider(tx, tz, 5, 5);
-  occluders.push(tower);
   landmarkInfo('Tribune Building', 1875,
     `Richard Morris Hunt's brick clock tower for Horace Greeley's New-York
      Tribune was one of the first elevator towers in the world — at 260 feet
@@ -1262,8 +1294,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 // The Western Union Telegraph Building (1875) on lower Broadway.
 {
   const wx = -1.5, wz = 57;
-  const main = box(5.5, 15, 5, 0x6d5b4d, wx, 7.5, wz);
-  main.castShadow = true;
+  landmarkBox(5.5, 5, 5, 4, wx, wz, { ground: 'shop' }); // granite, five storeys
   box(6, 0.6, 5.5, 0x53453a, wx, 15.3, wz);
   const mansard = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.2, 3.4, 4), lambert(0x3f3630));
   mansard.rotation.y = Math.PI / 4;
@@ -1274,7 +1305,6 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   pole.position.set(wx, 20.8, wz);
   scene.add(pole);
   addCollider(wx, wz, 5.5, 5);
-  occluders.push(main);
   landmarkInfo('Western Union Building', 1875,
     `George B. Post's ten-storey telegraph palace on Broadway was, with the
      Tribune, the city's first true skyscraper. Every day at noon a time-ball
@@ -1286,20 +1316,18 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 // Cooper Union (1859), in whose Great Hall Lincoln spoke in 1860.
 {
   const cx = 19, cz = -4;
-  const block = box(6, 11, 8, 0x6a4a39, cx, 5.5, cz);
-  block.castShadow = true;
-  box(6.5, 0.7, 8.5, 0x52382b, cx, 11.35, cz);
+  landmarkBox(6, 4, 8, 0, cx, cz); // brownstone, four storeys
+  box(6.5, 0.7, 8.5, 0x52382b, cx, 12.35, cz);
   for (let i = -1; i <= 1; i++) { // round-arched bays hinted with piers
-    box(0.6, 9.5, 0.35, 0x7d5a46, cx + i * 2, 4.75, cz + 4.05, scene, false);
+    box(0.6, 11.5, 0.35, 0x7d5a46, cx + i * 2, 5.75, cz + 4.05, scene, false);
   }
   addCollider(cx, cz, 6, 8);
-  occluders.push(block);
   landmarkInfo('Cooper Union', 1859,
     `Peter Cooper's free college of art and science, brownstone over an
      iron frame. In its Great Hall in February 1860 an Illinois lawyer named
      Lincoln gave the speech — “right makes might” — that carried him toward
      the presidency.`,
-    cx, cz, 15.5, { w: 6.5, h: 12.5, d: 8.5 });
+    cx, cz, 16.5, { w: 6.5, h: 13.5, d: 8.5 });
 }
 
 // Union Square (1839), with the equestrian Washington of 1856.
@@ -1342,23 +1370,20 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 // The Fifth Avenue Hotel (1859), white marble, facing Madison Square.
 {
   const hx = -17, hz = -76;
-  const hotel = box(7, 16, 5.5, 0xe8e0cd, hx, 8, hz);
-  hotel.castShadow = true;
-  box(7.5, 0.7, 6, 0xcdc4ab, hx, 16.35, hz);
-  box(7.1, 0.4, 5.7, 0xb9ad97, hx, 3.4, hz);   // beltcourse
-  box(7.2, 3.4, 5.7, 0xd5ccb6, hx, 1.7, hz);   // arcaded base
+  landmarkBox(7, 5, 5.5, 6, hx, hz, { ground: 'shop' }); // white marble over an arcaded base
+  box(7.5, 0.7, 6, 0xcdc4ab, hx, 15.35, hz);
+  box(7.1, 0.4, 5.7, 0xb9ad97, hx, 3.2, hz);   // beltcourse
   const flag = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3, 5), lambert(0x33302c));
-  flag.position.set(hx + 2.6, 18.2, hz + 1.8);
+  flag.position.set(hx + 2.6, 17.2, hz + 1.8);
   scene.add(flag);
   addCollider(hx, hz, 7, 5.5);
-  occluders.push(hotel);
   landmarkInfo('Fifth Avenue Hotel', 1859,
     `Amos Eno's white-marble palace on Madison Square — mocked as “Eno's
      Folly,” then the most celebrated hotel in America, with the first
      passenger elevator in any hotel. Princes, presidents, and the
      Republican bosses of the Gilded Age held court a block from Melville's
      front door.`,
-    hx, hz, 21, { w: 7.5, h: 18, d: 6 });
+    hx, hz, 20, { w: 7.5, h: 17, d: 6 });
 }
 
 // Info for the landmarks that were already on the island.
@@ -1426,6 +1451,12 @@ if (tankGeos.length) {
   mesh.castShadow = true;
   scene.add(mesh);
 }
+roofGeos.forEach((geos, i) => {
+  if (!geos.length) return;
+  const mesh = new THREE.Mesh(mergeGeometries(geos, false), lambert(ROOF_TONES[i]));
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+});
 
 /* ---------------- gas lamps ---------------- */
 {
@@ -1605,39 +1636,26 @@ function tree(x, z, s = 1) {
 // the street, its stoop stepping down onto the sidewalk.
 {
   const hx = 18, hz = -88.5;
-  const house = box(4.4, 9.6, 5, COLORS.brick, hx, 4.8, hz);
+  landmarkBox(4.4, 3, 5, 1, hx, hz, { ground: 'row' }); // three storeys of red brick
   addCollider(hx, hz, 4.4, 5);
-  box(4.9, 0.6, 5.5, 0x6e4a3a, hx, 9.85, hz); // cornice
-  box(1.2, 2.6, 0.3, 0x274029, hx - 0.9, 1.5, hz + 2.55); // green door
-  box(2.4, 0.6, 0.7, 0xb5a98c, hx - 0.9, 0.3, hz + 3.05); // high stoop
-  // window lintels and sashes on the street face
-  for (const fy of [2.4, 5.4, 8.2]) {
-    for (let wx = -1.3; wx <= 1.3; wx += 1.3) {
-      if (fy < 3 && wx < 0) continue; // door occupies that bay
-      box(0.82, 1.4, 0.12, 0x36302a, hx + wx, fy, hz + 2.52, scene, false);
-      box(0.6, 1.1, 0.13, 0x46525c, hx + wx, fy, hz + 2.53, scene, false);
-    }
-  }
-  house.castShadow = true;
-  occluders.push(house);
+  box(4.9, 0.6, 5.5, 0x6e4a3a, hx, 9.25, hz); // cornice
+  box(1.2, 2.6, 0.3, 0x274029, hx - 1.1, 1.5, hz + 2.55); // green door
+  box(2.4, 0.6, 0.7, 0xb5a98c, hx - 1.1, 0.3, hz + 3.05); // high stoop
 }
 
 // Madison Square Garden (1890) with its tower and the gilded Diana.
 let diana;
 {
-  const g = box(17, 12, 9.5, 0xc8a583, -4, 6, -86.5);
-  g.castShadow = true;
+  landmarkBox(17, 4, 9.5, 5, -4, -86.5); // yellow brick and terra cotta
   addCollider(-4, -86.5, 17, 9.5);
   box(17.6, 0.8, 10.1, 0xa9886a, -4, 12.4, -86.5);
-  const tower = box(4.6, 30, 4.6, 0xc8a583, 2, 15, -84);
-  tower.castShadow = true;
+  landmarkBox(4.6, 10, 4.6, 5, 2, -84); // the tower
   addCollider(2, -84, 4.6, 4.6);
   box(3.4, 3.2, 3.4, 0xb59478, 2, 31.6, -84); // loggia
   const cap = new THREE.Mesh(new THREE.ConeGeometry(2.2, 3, 8), lambert(0xa9886a));
   cap.position.set(2, 34.8, -84);
   cap.castShadow = true;
   scene.add(cap);
-  occluders.push(g, tower);
   // Diana, gilded, turning like a weathervane
   diana = new THREE.Group();
   const goldMat = new THREE.MeshPhongMaterial({ color: COLORS.gold, emissive: 0x6b5410, shininess: 100 });

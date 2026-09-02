@@ -307,20 +307,36 @@ function makeNumberSprite(n) {
 
 /* ---------------- water & land ---------------- */
 
-const waterGeo = new THREE.PlaneGeometry(440, 500, 60, 68);
+// The harbor: a long swell with wind-chop riding on top. The same wave
+// runs in the water's vertex shader (so the plane can be fine and wide
+// for free) and here in JS, so the ships ride the swell they float on.
+const WATER_Y = -0.55, WATER_Z = -8;
+function waveHeight(wx, wz, t) {
+  const x = wx, z = wz - WATER_Z; // the plane's local frame
+  return WATER_Y +
+    Math.sin(x * 0.09 + t * 0.9) * Math.cos(z * 0.07 + t * 0.7) * 0.28 +
+    Math.sin(x * 0.23 - t * 1.6) * Math.sin(z * 0.19 + t * 1.2) * 0.11;
+}
+const waterUniforms = { uTime: { value: 0 } };
+const waterGeo = new THREE.PlaneGeometry(600, 640, 160, 170);
 waterGeo.rotateX(-Math.PI / 2);
-const waterBase = waterGeo.attributes.position.array.slice();
-const water = new THREE.Mesh(
-  waterGeo,
-  new THREE.MeshStandardMaterial({
-    color: 0x86aca8,
-    roughness: 0.32,
-    metalness: 0.08,
-    flatShading: true,
-    envMapIntensity: 1.1,
-  })
-);
-water.position.set(0, -0.55, -8);
+const waterMat = new THREE.MeshStandardMaterial({
+  color: 0x86aca8,
+  roughness: 0.32,
+  metalness: 0.08,
+  flatShading: true, // normals come from screen derivatives, so displacement needs no recompute
+  envMapIntensity: 1.1,
+});
+waterMat.onBeforeCompile = (shader) => {
+  shader.uniforms.uTime = waterUniforms.uTime;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nuniform float uTime;')
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+      transformed.y += sin(transformed.x * 0.09 + uTime * 0.9) * cos(transformed.z * 0.07 + uTime * 0.7) * 0.28
+                     + sin(transformed.x * 0.23 - uTime * 1.6) * sin(transformed.z * 0.19 + uTime * 1.2) * 0.11;`);
+};
+const water = new THREE.Mesh(waterGeo, waterMat);
+water.position.set(0, WATER_Y, WATER_Z);
 water.receiveShadow = true;
 scene.add(water);
 
@@ -335,6 +351,46 @@ function extrudeLand(points, topColor, sideColor, depth = 1.8) {
 }
 
 extrudeLand(ISLAND, COLORS.islandTop, COLORS.islandSide);
+
+// Surf: a ribbon of foam breaking along the island's shore, scrolling in
+// toward the land and breathing with the swell.
+const foam = (() => {
+  const [cv, c] = canvas2d(128, 64);
+  const g = c.createLinearGradient(0, 64, 0, 0); // bright at the shore (canvas bottom = v 0)
+  g.addColorStop(0, 'rgba(255,253,245,0.9)');
+  g.addColorStop(0.4, 'rgba(255,253,245,0.35)');
+  g.addColorStop(1, 'rgba(255,253,245,0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, 128, 64);
+  c.fillStyle = 'rgba(255,255,255,0.55)';
+  for (let i = 0; i < 40; i++) c.fillRect(Math.random() * 128, 20 + Math.random() * 44, 2 + Math.random() * 10, 1.5);
+  c.fillStyle = 'rgba(134,172,168,0.4)'; // gaps, in the water's own colour
+  for (let i = 0; i < 30; i++) c.fillRect(Math.random() * 128, 34 + Math.random() * 30, 3 + Math.random() * 8, 2);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  const pos = [], uv = [], idx = [];
+  const W = 1.5;
+  for (let i = 0; i < ISLAND.length; i++) {
+    const [ax, az] = ISLAND[i], [bx, bz] = ISLAND[(i + 1) % ISLAND.length];
+    const len = Math.hypot(bx - ax, bz - az);
+    let nx = -(bz - az) / len, nz = (bx - ax) / len; // a perpendicular, flipped if it points inland
+    if (pointInPoly((ax + bx) / 2 + nx * 0.5, (az + bz) / 2 + nz * 0.5)) { nx = -nx; nz = -nz; }
+    const base = pos.length / 3;
+    pos.push(ax, -0.2, az, bx, -0.2, bz, bx + nx * W, -0.2, bz + nz * W, ax + nx * W, -0.2, az + nz * W);
+    uv.push(0, 0, len / 4, 0, len / 4, 1, 0, 1);
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide, opacity: 0.7 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 1;
+  scene.add(mesh);
+  return { mat, tex };
+})();
 
 // Outer shores: New Jersey and Brooklyn, as plainer paper slabs.
 const nj = box(96, 2, 180, COLORS.outerLand, -114, -0.9, -42, scene, false);
@@ -1797,10 +1853,12 @@ function sailShip(x, z, scale = 1, rotY = 0) {
     }
   }
   g.position.set(x, 0, z);
+  g.rotation.order = 'YXZ'; // heading first, so pitch and roll stay in the hull's frame
   g.rotation.y = rotY;
   g.scale.setScalar(scale);
+  g.userData.stern = -5.5; // where the wake starts, in local units
   scene.add(g);
-  bobbers.push({ obj: g, phase: Math.random() * 6 });
+  bobbers.push({ obj: g, half: 5 * scale, beam: 1.5 * scale });
   return g;
 }
 
@@ -1813,9 +1871,11 @@ function steamShip(x, z, rotY = 0) {
   stack.position.set(0, 3.8, 0.5);
   g.add(stack);
   g.position.set(x, 0, z);
+  g.rotation.order = 'YXZ';
   g.rotation.y = rotY;
+  g.userData.stern = -6.5;
   scene.add(g);
-  bobbers.push({ obj: g, phase: Math.random() * 6 });
+  bobbers.push({ obj: g, half: 6, beam: 1.7 });
   return g;
 }
 
@@ -1940,10 +2000,11 @@ const clouds = [];
   }
 }
 
-// Coal smoke: one Points cloud shared by the El locomotive and the two
-// moving steamers — a single draw call for every plume in the harbor.
-const smoke = (() => {
-  const N = 130;
+// A cloud of soft particles in one draw call: coal smoke over the harbor,
+// foam churned up behind the ships. Each system has its own tint, size,
+// lifetime and drift; `emit` seeds one particle at a point on a prop.
+function makeParticles({ count, color, size, alpha, life, drift, jitter }) {
+  const N = count;
   const pos = new Float32Array(N * 3);
   const aSize = new Float32Array(N);
   const aAlpha = new Float32Array(N);
@@ -1966,7 +2027,7 @@ const smoke = (() => {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       map: { value: new THREE.CanvasTexture(cv) },
-      color: { value: new THREE.Color(0x6b655c) },
+      color: { value: new THREE.Color(color) },
     },
     vertexShader: `
       attribute float aSize;
@@ -2000,11 +2061,11 @@ const smoke = (() => {
     const p = parts[cursor];
     cursor = (cursor + 1) % N;
     p.age = 0;
-    p.life = 3.2 + Math.random() * 1.4;
-    p.x = tip.x + (Math.random() - 0.5) * 0.3;
+    p.life = life[0] + Math.random() * (life[1] - life[0]);
+    p.x = tip.x + (Math.random() - 0.5) * jitter;
     p.y = tip.y;
-    p.z = tip.z + (Math.random() - 0.5) * 0.3;
-    p.vx = 0.5 + Math.random() * 0.4; // downwind, with the clouds
+    p.z = tip.z + (Math.random() - 0.5) * jitter;
+    p.vx = drift[0] + Math.random() * (drift[1] - drift[0]);
     p.vy = vy * (0.85 + Math.random() * 0.3);
     p.vz = (Math.random() - 0.5) * 0.3;
   }
@@ -2021,15 +2082,23 @@ const smoke = (() => {
       pos[i * 3] = p.x;
       pos[i * 3 + 1] = p.y;
       pos[i * 3 + 2] = p.z;
-      aSize[i] = 1.4 + k * 4.2;
-      aAlpha[i] = k < 0.12 ? (k / 0.12) * 0.4 : 0.4 * (1 - (k - 0.12) / 0.88);
+      aSize[i] = size[0] + k * (size[1] - size[0]);
+      aAlpha[i] = k < 0.12 ? (k / 0.12) * alpha : alpha * (1 - (k - 0.12) / 0.88);
     }
     geo.attributes.position.needsUpdate = true;
     geo.attributes.aSize.needsUpdate = true;
     geo.attributes.aAlpha.needsUpdate = true;
   }
   return { emit, update };
-})();
+}
+const smoke = makeParticles({
+  count: 130, color: 0x6b655c, size: [1.4, 5.6], alpha: 0.4, life: [3.2, 4.6],
+  drift: [0.5, 0.9], jitter: 0.3, // downwind, with the clouds
+});
+const wake = makeParticles({
+  count: 160, color: 0xf4f1e6, size: [0.9, 3.4], alpha: 0.5, life: [2.4, 3.8],
+  drift: [0, 0], jitter: 1.4, // foam stays where the hull churned it
+});
 // every smoking prop: emit cadence and the funnel tip in local coordinates
 const smokeSources = [
   { obj: train, period: 0.3, tipY: 9.95, tipZ: 6, vy: 2.4, t: 0 },
@@ -2037,6 +2106,8 @@ const smokeSources = [
     .filter((d) => d.smokes)
     .map((d) => ({ obj: d.obj, period: 0.45, tipY: 5.1, tipZ: 0.5, vy: 1.7, t: 0 })),
 ];
+// every ship under way trails foam from its stern
+const wakeSources = drifters.map((d) => ({ obj: d.obj, period: 0.14, tipY: 0.45, tipZ: d.obj.userData.stern, vy: 0, t: 0 }));
 
 // "The Tide Turns": once the chart is complete the whole island settles
 // into a permanent golden hour. warmth runs 0 (day) to 1 (dusk).
@@ -2639,7 +2710,7 @@ function angleLerp(a, b, t) {
   return a + d * t;
 }
 
-const wPos = water.geometry.attributes.position;
+const _fore = new THREE.Vector2(), _beam = new THREE.Vector2();
 
 function animate() {
   requestAnimationFrame(animate);
@@ -2859,21 +2930,24 @@ function animate() {
     w.g.rotation.y = w.dir > 0 ? 0 : Math.PI;
   }
 
-  // --- water: a long swell with wind-chop riding on top ---
-  for (let i = 0; i < wPos.count; i++) {
-    const x = waterBase[i * 3], z = waterBase[i * 3 + 2];
-    wPos.array[i * 3 + 1] =
-      Math.sin(x * 0.09 + t * 0.9) * Math.cos(z * 0.07 + t * 0.7) * 0.28 +
-      Math.sin(x * 0.23 - t * 1.6) * Math.sin(z * 0.19 + t * 1.2) * 0.11;
-  }
-  wPos.needsUpdate = true;
-  // no normal recompute: the material is flat-shaded, so the shader derives
-  // face normals from position derivatives and never reads the attribute
+  // --- water: the swell runs on the GPU; the surf breathes with it ---
+  waterUniforms.uTime.value = t;
+  foam.tex.offset.y = (t * 0.22) % 1;
+  foam.mat.opacity = 0.62 + 0.18 * Math.sin(t * 1.1);
 
-  // --- moving props ---
+  // --- moving props: every hull rides the swell, pitching over the crests
+  // fore-and-aft and rolling with the chop across the beam ---
   for (const b of bobbers) {
-    b.obj.position.y = -0.45 + Math.sin(t * 0.9 + b.phase) * 0.18; // hulls sit at the waterline
-    b.obj.rotation.z = Math.sin(t * 0.7 + b.phase) * 0.02;
+    const p = b.obj.position, yaw = b.obj.rotation.y;
+    _fore.set(Math.sin(yaw), Math.cos(yaw));     // local +z (the bow) in world x/z
+    _beam.set(Math.cos(yaw), -Math.sin(yaw));    // local +x (starboard)
+    const hF = waveHeight(p.x + _fore.x * b.half, p.z + _fore.y * b.half, t);
+    const hA = waveHeight(p.x - _fore.x * b.half, p.z - _fore.y * b.half, t);
+    const hR = waveHeight(p.x + _beam.x * b.beam, p.z + _beam.y * b.beam, t);
+    const hL = waveHeight(p.x - _beam.x * b.beam, p.z - _beam.y * b.beam, t);
+    p.y = (hF + hA + hR + hL) / 4 - 0.2; // the waterline a third of the way up the hull
+    b.obj.rotation.x = Math.atan2(hF - hA, 2 * b.half) * 0.8;
+    b.obj.rotation.z = Math.atan2(hR - hL, 2 * b.beam) * 0.6;
   }
   for (const d of drifters) {
     const p = d.obj.position;
@@ -2892,10 +2966,15 @@ function animate() {
     while (s.t > s.period) { s.t -= s.period; smoke.emit(s.obj, 0, s.tipY, s.tipZ, s.vy); }
   }
   smoke.update(dt);
+  for (const s of wakeSources) {
+    s.t += dt;
+    while (s.t > s.period) { s.t -= s.period; wake.emit(s.obj, 0, s.tipY, s.tipZ, 0); }
+  }
+  wake.update(dt);
 
   diana.rotation.y = t * 0.4;
 
-  whale.position.y = -0.7 + Math.sin(t * 0.5) * 0.35;
+  whale.position.y = waveHeight(whale.position.x, whale.position.z, t) - 0.15 + Math.sin(t * 0.5) * 0.35;
   const spoutT = (t % 7) / 7;
   spout.visible = spoutT < 0.3;
   if (spout.visible) {

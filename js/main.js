@@ -3101,6 +3101,7 @@ if (document.fonts) {
   const startBtn = document.getElementById('start-btn');
   startBtn.textContent = save.charted.length > 0 ? 'Return ashore' : 'Go ashore';
   startBtn.disabled = false;
+  document.getElementById('load-note').classList.add('hidden'); // in case the slow-load note had appeared
 }
 
 animate();

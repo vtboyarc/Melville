@@ -24,8 +24,10 @@ Own,"* The New York Times, January 19, 1982):
 ## Playing
 
 - **W A S D** / arrow keys to walk; **E** or the on-screen button to visit a site
-- **Drag** (mouse, or right thumb on touch screens) to look around; left thumb is the walk joystick
+- **Drag** (mouse, or right thumb on touch screens) to look around; left thumb is the walk joystick; **scroll** to bring the camera in or out
 - **M** (or the Chart View button) toggles a bird's-eye view of the whole island, in the spirit of the original 1982 map
+- **Tap** any pin or landmark, on the streets or from the chart, to read its story; a site is charted only on foot, standing at its marker
+- **Escape** closes an open card
 - The compass points to the nearest uncharted site; the Chart Key tracks progress
 - Charted sites are remembered between visits ("begin a new chart" on the
   title screen starts over); the ♪ button mutes the sound

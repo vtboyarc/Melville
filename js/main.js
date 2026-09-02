@@ -47,8 +47,8 @@ for (let z = 12; z >= -104; z -= 8) STREETS.push(z);
 
 const EL_X = 30; // Third Avenue El runs along x = 30, z in [-109, 0]
 
-const CLEAR_CIRCLES = SITES.map((s) => ({ x: s.pos.x, z: s.pos.z, r: 8.5 }));
-CLEAR_CIRCLES.push({ x: 18, z: -84, r: 5.5 });   // the house itself
+const CLEAR_CIRCLES = SITES.map((s) => ({ x: s.pos.x, z: s.pos.z, r: 6 }));
+CLEAR_CIRCLES.push({ x: 18, z: -88.5, r: 4.5 }); // the house itself
 CLEAR_CIRCLES.push({ x: -8, z: 91, r: 6 });      // Castle Garden
 CLEAR_CIRCLES.push({ x: 19, z: 46, r: 7 });      // bridge approach
 CLEAR_CIRCLES.push({ x: 2, z: 48, r: 10 });      // City Hall and its park
@@ -61,6 +61,16 @@ const CLEAR_RECTS = [
   { x0: -15, x1: 7, z0: -93, z1: -80 },   // Madison Square Garden block
   { x0: -12, x1: 10, z0: -80, z1: -68 },  // Madison Square Park
   { x0: -11, x1: 7, z0: -45, z1: -35 },   // Union Square
+];
+// Footprints that interrupt the street grid — the landmarks and parks that
+// take more than a block. Roads and sidewalks stop at their edges instead
+// of running underneath them.
+const STREET_CUTS = [
+  { x0: -13, x1: 5, z0: -91, z1: -81 },          // Madison Square Garden and its tower
+  { x0: -10.5, x1: 8.9, z0: -79.5, z1: -69 },    // Madison Square Park
+  { x0: -20.5, x1: -13.5, z0: -78.75, z1: -73.25 }, // Fifth Avenue Hotel
+  { x0: 16, x1: 22, z0: -8, z1: 0 },             // Cooper Union
+  { x0: -10, x1: 6, z0: -42.8, z1: -37.2 },      // Union Square
 ];
 
 const DOWNTOWN_PATHS = [
@@ -236,17 +246,26 @@ function cylBetween(p1, p2, r, color, parent = scene) {
   return mesh;
 }
 
+// Every canvas label is inked at load, usually before the web font has
+// arrived; each keeps its draw routine so it can be inked again afterwards.
+const labelRedraws = [];
+
 function makeTextTexture(text, { size = 72, color = 'rgba(43,38,32,0.55)', italic = true } = {}) {
   const [cv, ctx] = canvas2d(1024, 144);
-  ctx.font = `${italic ? 'italic ' : ''}600 ${size}px 'EB Garamond', Georgia, serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = color;
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '14px';
-  ctx.fillText(text, 512, 76);
+  const draw = () => {
+    ctx.clearRect(0, 0, 1024, 144);
+    ctx.font = `${italic ? 'italic ' : ''}600 ${size}px 'EB Garamond', Georgia, serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '14px';
+    ctx.fillText(text, 512, 76);
+  };
+  draw();
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
+  labelRedraws.push({ tex, draw });
   return tex;
 }
 
@@ -262,20 +281,25 @@ function waterLabel(text, x, z, rotY = 0, width = 42) {
 
 function makeNumberSprite(n) {
   const [cv, ctx] = canvas2d(128, 128);
-  ctx.beginPath();
-  ctx.arc(64, 64, 52, 0, Math.PI * 2);
-  ctx.fillStyle = '#b23a2c';
-  ctx.fill();
-  ctx.lineWidth = 6;
-  ctx.strokeStyle = '#efe6d0';
-  ctx.stroke();
-  ctx.font = `600 64px 'EB Garamond', Georgia, serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#efe6d0';
-  ctx.fillText(String(n), 64, 68);
+  const draw = () => {
+    ctx.clearRect(0, 0, 128, 128);
+    ctx.beginPath();
+    ctx.arc(64, 64, 52, 0, Math.PI * 2);
+    ctx.fillStyle = '#b23a2c';
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#efe6d0';
+    ctx.stroke();
+    ctx.font = `600 64px 'EB Garamond', Georgia, serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#efe6d0';
+    ctx.fillText(String(n), 64, 68);
+  };
+  draw();
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
+  labelRedraws.push({ tex, draw });
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: true }));
   sprite.scale.set(3.6, 3.6, 1);
   return sprite;
@@ -283,20 +307,49 @@ function makeNumberSprite(n) {
 
 /* ---------------- water & land ---------------- */
 
-const waterGeo = new THREE.PlaneGeometry(440, 500, 60, 68);
+// The harbor: a long swell with wind-chop riding on top. The same wave
+// runs in the water's vertex shader (so the plane can be fine and wide
+// for free) and here in JS, so the ships ride the swell they float on.
+// Three terms: the harbor swell, the wind-chop across it, and a fine
+// ripple. Crests reach about 0.65 above the mean, which keeps them just
+// under the island's top at y = 0. Keep the GLSL below in step with this.
+const WATER_Y = -0.75, WATER_Z = -8;
+function waveHeight(wx, wz, t) {
+  const x = wx, z = wz - WATER_Z; // the plane's local frame
+  return WATER_Y +
+    Math.sin(x * 0.09 + t * 0.9) * Math.cos(z * 0.07 + t * 0.7) * 0.42 +
+    Math.sin(x * 0.23 - t * 1.6) * Math.sin(z * 0.19 + t * 1.2) * 0.16 +
+    Math.sin(x * 0.41 + z * 0.37 + t * 2.1) * 0.07;
+}
+const waterUniforms = { uTime: { value: 0 } };
+const waterGeo = new THREE.PlaneGeometry(600, 640, 240, 256);
 waterGeo.rotateX(-Math.PI / 2);
-const waterBase = waterGeo.attributes.position.array.slice();
-const water = new THREE.Mesh(
-  waterGeo,
-  new THREE.MeshStandardMaterial({
-    color: 0x86aca8,
-    roughness: 0.32,
-    metalness: 0.08,
-    flatShading: true,
-    envMapIntensity: 1.1,
-  })
-);
-water.position.set(0, -0.55, -8);
+const waterMat = new THREE.MeshStandardMaterial({
+  color: 0x4a7377, // the grey-green of the harbor, not a swimming pool
+  roughness: 0.34,
+  metalness: 0.05,
+  flatShading: true, // normals come from screen derivatives, so displacement needs no recompute
+  envMapIntensity: 0.55, // the room reflection washes the water pale if left strong
+});
+waterMat.onBeforeCompile = (shader) => {
+  shader.uniforms.uTime = waterUniforms.uTime;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nuniform float uTime;\nvarying float vCrest;')
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+      float wave = sin(transformed.x * 0.09 + uTime * 0.9) * cos(transformed.z * 0.07 + uTime * 0.7) * 0.42
+                 + sin(transformed.x * 0.23 - uTime * 1.6) * sin(transformed.z * 0.19 + uTime * 1.2) * 0.16
+                 + sin(transformed.x * 0.41 + transformed.z * 0.37 + uTime * 2.1) * 0.07;
+      transformed.y += wave;
+      vCrest = wave / 0.65;`);
+  // crests run paler and troughs deeper, so the swell reads even where
+  // the light is flat
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying float vCrest;')
+    .replace('#include <color_fragment>', `#include <color_fragment>
+      diffuseColor.rgb *= 0.9 + 0.16 * vCrest;`);
+};
+const water = new THREE.Mesh(waterGeo, waterMat);
+water.position.set(0, WATER_Y, WATER_Z);
 water.receiveShadow = true;
 scene.add(water);
 
@@ -311,6 +364,46 @@ function extrudeLand(points, topColor, sideColor, depth = 1.8) {
 }
 
 extrudeLand(ISLAND, COLORS.islandTop, COLORS.islandSide);
+
+// Surf: a ribbon of foam breaking along the island's shore, scrolling in
+// toward the land and breathing with the swell.
+const foam = (() => {
+  const [cv, c] = canvas2d(128, 64);
+  const g = c.createLinearGradient(0, 64, 0, 0); // bright at the shore (canvas bottom = v 0)
+  g.addColorStop(0, 'rgba(255,253,245,0.9)');
+  g.addColorStop(0.4, 'rgba(255,253,245,0.35)');
+  g.addColorStop(1, 'rgba(255,253,245,0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, 128, 64);
+  c.fillStyle = 'rgba(255,255,255,0.55)';
+  for (let i = 0; i < 40; i++) c.fillRect(Math.random() * 128, 20 + Math.random() * 44, 2 + Math.random() * 10, 1.5);
+  c.fillStyle = 'rgba(74,115,119,0.4)'; // gaps, in the water's own colour
+  for (let i = 0; i < 30; i++) c.fillRect(Math.random() * 128, 34 + Math.random() * 30, 3 + Math.random() * 8, 2);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  const pos = [], uv = [], idx = [];
+  const W = 1.5;
+  for (let i = 0; i < ISLAND.length; i++) {
+    const [ax, az] = ISLAND[i], [bx, bz] = ISLAND[(i + 1) % ISLAND.length];
+    const len = Math.hypot(bx - ax, bz - az);
+    let nx = -(bz - az) / len, nz = (bx - ax) / len; // a perpendicular, flipped if it points inland
+    if (pointInPoly((ax + bx) / 2 + nx * 0.5, (az + bz) / 2 + nz * 0.5)) { nx = -nx; nz = -nz; }
+    const base = pos.length / 3;
+    pos.push(ax, -0.2, az, bx, -0.2, bz, bx + nx * W, -0.2, bz + nz * W, ax + nx * W, -0.2, az + nz * W);
+    uv.push(0, 0, len / 4, 0, len / 4, 1, 0, 1);
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide, opacity: 0.7 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 1;
+  scene.add(mesh);
+  return { mat, tex };
+})();
 
 // Outer shores: New Jersey and Brooklyn, as plainer paper slabs.
 const nj = box(96, 2, 180, COLORS.outerLand, -114, -0.9, -42, scene, false);
@@ -373,18 +466,46 @@ function streetPlane(len, wide, alongX = true) {
   return m;
 }
 
+// Split the span [a, b] of a road whose centre line sits at `line` on the
+// other axis around every STREET_CUTS rect that straddles that line; stubs
+// shorter than three units are dropped rather than left as slivers.
+function cutSpan(a, b, line, alongX) {
+  let spans = [[a, b]];
+  for (const c of STREET_CUTS) {
+    const [l0, l1, s0, s1] = alongX ? [c.z0, c.z1, c.x0, c.x1] : [c.x0, c.x1, c.z0, c.z1];
+    if (line < l0 || line > l1) continue;
+    const next = [];
+    for (const [p, q] of spans) {
+      if (s1 <= p || s0 >= q) { next.push([p, q]); continue; }
+      if (s0 > p) next.push([p, s0]);
+      if (s1 < q) next.push([s1, q]);
+    }
+    spans = next;
+  }
+  return spans.filter(([p, q]) => q - p >= 3);
+}
+
 const streetSegs = []; // east-west: { z, x0, x1 }
 const aveSegs = [];    // north-south: { x, z0, z1 }
+function addStreet(z, x0, x1) {
+  const m = streetPlane(x1 - x0, 2.2);
+  m.position.set((x0 + x1) / 2, 0.06, z);
+  scene.add(m);
+  streetSegs.push({ z, x0, x1 });
+}
+function addAvenue(x, z0, z1) {
+  const m = streetPlane(z1 - z0, 2.8, false);
+  m.position.set(x, 0.05, (z0 + z1) / 2);
+  scene.add(m);
+  aveSegs.push({ x, z0, z1 });
+}
 for (const z of STREETS) {
   let xmin = Infinity, xmax = -Infinity;
   for (let x = -45; x <= 45; x += 0.5) {
     if (pointInPoly(x, z)) { xmin = Math.min(xmin, x); xmax = Math.max(xmax, x); }
   }
   if (xmax - xmin > 6) {
-    const m = streetPlane(xmax - xmin - 2, 2.2);
-    m.position.set((xmin + xmax) / 2, 0.06, z);
-    scene.add(m);
-    streetSegs.push({ z, x0: xmin + 1, x1: xmax - 1 });
+    for (const [x0, x1] of cutSpan(xmin + 1, xmax - 1, z, true)) addStreet(z, x0, x1);
   }
 }
 for (const x of AVENUES) {
@@ -393,12 +514,11 @@ for (const x of AVENUES) {
     if (pointInPoly(x, z)) { zmin = Math.min(zmin, z); zmax = Math.max(zmax, z); }
   }
   if (zmax - zmin > 6) {
-    const m = streetPlane(zmax - zmin - 2, 2.8, false);
-    m.position.set(x, 0.05, (zmin + zmax) / 2);
-    scene.add(m);
-    aveSegs.push({ x, z0: zmin + 1, z1: zmax - 1 });
+    for (const [z0, z1] of cutSpan(zmin + 1, zmax - 1, x, false)) addAvenue(x, z0, z1);
   }
 }
+// Third Avenue itself, under the El: the pillars stand in the roadway.
+addAvenue(EL_X, -108, -1);
 
 // Bluestone sidewalks flanking every paved street and avenue.
 {
@@ -618,7 +738,12 @@ const FACADES = [
   { style: 'brick', wall: '#a8643f', joint: 'rgba(0,0,0,0.14)', trim: '#d8cbab' },
   { style: 'castiron', wall: '#cfc2a4', joint: 'rgba(0,0,0,0.2)', trim: '#bdb091' },
   { style: 'stone', wall: '#9b9183', joint: 'rgba(0,0,0,0.15)', trim: '#b3a995' },
+  // the last two are reserved for landmarks: Stanford White's yellow brick
+  // and the white marble of the hotel and City Hall
+  { style: 'brick', wall: '#c8a583', joint: 'rgba(0,0,0,0.11)', trim: '#e4d3b2' },
+  { style: 'stone', wall: '#d9d2c0', joint: 'rgba(0,0,0,0.09)', trim: '#c9c1ad' },
 ];
+const ROW_FACADES = 5; // how many of the FACADES the ordinary streets draw from
 // masonry PBR setup shared by the facades and the ground floors
 function masonryMat({ map, bump, rough }) {
   return new THREE.MeshStandardMaterial({
@@ -773,6 +898,8 @@ const awnGeos = [[], []];
 const facadeGeos = FACADES.map(() => []);
 const trimGeos = [];  // cornices, chimneys, stoops — one dark material
 const tankGeos = [];  // rooftop water tanks
+const ROOF_TONES = [0x57514a, 0x7f7466, 0x6b6a66]; // tar, tin, slate
+const roofGeos = ROOF_TONES.map(() => []);
 
 // Scale a box's UVs so the texture shows `bays` bays wide and `floors`
 // floors high; faces order is +x, -x, +y, -y, +z, -z (4 verts each).
@@ -839,10 +966,14 @@ function addBuilding(x, z, w, d, floors, pi, { stoop = false, tank = 'auto', gro
     aw.translate(x, 2.5, z + (d / 2 + 0.42) * (face === 'north' ? -1 : 1));
     awnGeos[Math.random() < 0.5 ? 0 : 1].push(aw);
   }
-  // heavy Italianate cornice; its top doubles as the (hidden) roof
+  // heavy Italianate cornice, and above it the roof itself — tar, tin or
+  // slate — so the city reads as a roofscape from the chart
   const cornice = new THREE.BoxGeometry(w + 0.4, 0.6, d + 0.4);
   cornice.translate(x, h + 0.1, z);
   trimGeos.push(cornice);
+  const roof = new THREE.BoxGeometry(w - 0.2, 0.16, d - 0.2);
+  roof.translate(x, h + 0.45, z);
+  roofGeos[Math.floor(Math.random() * roofGeos.length)].push(roof);
   // chimneys
   const nCh = Math.floor(Math.random() * 3);
   for (let c = 0; c < nCh; c++) {
@@ -888,7 +1019,7 @@ for (let ai = 0; ai < AVENUES.length - 1; ai++) {
         if (cursor + w > x1) w = x1 - cursor;
         if (w < 1.6) break;
         const floors = 3 + Math.floor(Math.random() * 3); // 3–5 storeys
-        const pi = Math.floor(Math.random() * FACADES.length);
+        const pi = Math.floor(Math.random() * ROW_FACADES);
         // corner lots get shops; mid-block keeps its stoops and parlors
         const corner = cursor <= x0 + 0.01 || cursor + w >= x1 - 1.6;
         addBuilding(cursor + w / 2, zc, w - 0.15, depth, floors, pi === 3 ? 0 : pi, {
@@ -908,8 +1039,32 @@ for (let k = 0; k < 150; k++) {
   const w = 2.6 + Math.random() * 2.2;
   const d = 2.4 + Math.random() * 1.8;
   const floors = 3 + Math.floor(Math.random() * 3);
-  const pi = Math.random() < 0.3 ? 3 : Math.floor(Math.random() * FACADES.length);
+  const pi = Math.random() < 0.3 ? 3 : Math.floor(Math.random() * ROW_FACADES);
   addBuilding(x, z, w, d, floors, pi, { ground: Math.random() < 0.65 ? 'shop' : 'row' });
+}
+
+// A windowed landmark block: the facade texture on the upper floors and,
+// optionally, a shopfront or rowhouse ground floor. Both meshes occlude the
+// camera; the upper one is returned so callers can hang ornament off it.
+function landmarkBox(w, floors, d, pi, x, z, { ground = null, yBase = 0 } = {}) {
+  const baysW = Math.max(1, Math.round(w / BAY_W));
+  const baysD = Math.max(1, Math.round(d / BAY_W));
+  let y = yBase, upper = floors;
+  if (ground) {
+    const g = uvBox(new THREE.BoxGeometry(w, FLOOR_H, d), baysW, baysD, TEX_FLOORS);
+    g.translate(x, y + FLOOR_H / 2, z);
+    const gm = new THREE.Mesh(g, groundMats[ground]);
+    gm.castShadow = gm.receiveShadow = true;
+    scene.add(gm);
+    occluders.push(gm);
+    y += FLOOR_H;
+    upper -= 1;
+  }
+  const m = new THREE.Mesh(facadeBox(x, z, w, d, upper, y), facadeMats[pi]);
+  m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+  occluders.push(m);
+  return m;
 }
 
 // Trinity Church (its spire ruled the skyline until 1890).
@@ -964,7 +1119,7 @@ const landmarkLabels = [];
 // `range` is how far away the name fades in on foot — harbor landmarks
 // are visible from the Battery, so theirs reach across the water.
 // Drawn at high resolution so chart view stays crisp.
-function landmarkLabel(text, x, y, z, range = 34) {
+function landmarkLabel(text, x, y, z, range = 34, chart = {}) {
   const cv = document.createElement('canvas');
   const font = `500 84px 'EB Garamond', Georgia, serif`;
   let ctx = cv.getContext('2d');
@@ -975,26 +1130,33 @@ function landmarkLabel(text, x, y, z, range = 34) {
   cv.width = w;
   cv.height = 160;
   ctx = cv.getContext('2d');
-  ctx.font = font;
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '12px';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.lineWidth = 18;
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = 'rgba(239,230,208,0.85)';
-  ctx.strokeText(text, w / 2, 84);
-  ctx.fillStyle = 'rgba(43,38,32,0.95)';
-  ctx.fillText(text, w / 2, 84);
+  const draw = () => {
+    ctx.clearRect(0, 0, w, 160);
+    ctx.font = font;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '12px';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 18;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(239,230,208,0.85)';
+    ctx.strokeText(text, w / 2, 84);
+    ctx.fillStyle = 'rgba(43,38,32,0.95)';
+    ctx.fillText(text, w / 2, 84);
+  };
+  draw();
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
+  labelRedraws.push({ tex, draw });
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
   sprite.renderOrder = 5;
   sprite.position.set(x, y, z);
   const sh = 2.03, sw = sh * (w / 160);
   sprite.scale.set(sw, sh, 1);
   scene.add(sprite);
-  landmarkLabels.push({ sprite, x, z, w: sw, h: sh, range });
+  // chart.dx / chart.dz nudge the label in chart view so the downtown
+  // cluster does not pile up; on foot every label sits over its landmark
+  landmarkLabels.push({ sprite, x, z, w: sw, h: sh, range, cdx: chart.dx || 0, cdz: chart.dz || 0 });
   return sprite;
 }
 
@@ -1002,8 +1164,8 @@ function landmarkLabel(text, x, y, z, range = 34) {
 // opens a short history card. The label sprite and an invisible volume
 // around the structure both catch the tap.
 const tapTargets = [];
-function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 0, d = 8 } = {}) {
-  const sprite = landmarkLabel(year ? `${name} · ${year}` : name, x, labelY, z, range);
+function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 0, d = 8, chart = {} } = {}) {
+  const sprite = landmarkLabel(year ? `${name} · ${year}` : name, x, labelY, z, range, chart);
   const info = { name, year, blurb };
   sprite.userData.landmark = info;
   tapTargets.push(sprite);
@@ -1120,23 +1282,21 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   parkGreen(new THREE.CircleGeometry(4.5, 18), 2, 44);
   tree(-1, 43, 0.8);
   tree(5, 45, 0.9);
-  const hall = box(10, 10, 6, 0xded6c2, 2, 5, 52);
-  hall.castShadow = true;
-  box(10.6, 0.6, 6.6, 0xc7bda5, 2, 10.3, 52);
-  box(3.6, 3, 3.6, 0xded6c2, 2, 11.8, 52); // attic pavilion
+  landmarkBox(10, 3, 6, 6, 2, 52); // marble, three tall storeys
+  box(10.6, 0.6, 6.6, 0xc7bda5, 2, 9.3, 52);
+  box(3.6, 3, 3.6, 0xded6c2, 2, 10.8, 52); // attic pavilion
   const drum = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 2.2, 10), lambert(0xd5ccb6));
-  drum.position.set(2, 14.4, 52);
+  drum.position.set(2, 13.4, 52);
   const cupola = new THREE.Mesh(new THREE.SphereGeometry(1.3, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), lambert(0xb3a479));
-  cupola.position.set(2, 15.5, 52);
+  cupola.position.set(2, 14.5, 52);
   scene.add(drum, cupola);
   addCollider(2, 52, 10, 6);
-  occluders.push(hall);
   landmarkInfo('City Hall', 1812,
     `The marble French-Renaissance City Hall opened in 1812, seven years
      before Melville was born around the corner on Pearl Street. In 1865
      Lincoln lay in state under its rotunda while the city he had carried
      filed past.`,
-    2, 52, 19, { w: 10, h: 17, d: 6 });
+    2, 52, 18, { w: 10, h: 16, d: 6 });
 }
 
 // Federal Hall (1842), Washington's statue (1883) on its steps.
@@ -1176,40 +1336,36 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
      The Greek Revival building itself served as the Custom House until
      1862 — the very service in which Melville later spent nineteen years —
      and then as the Sub-Treasury, its vaults full of gold.`,
-    fx, fz, 12, { w: 8.4, h: 9.5, d: 7 });
+    fx, fz, 12, { w: 8.4, h: 9.5, d: 7, chart: { dz: 2 } });
 }
 
 // The Tribune Building (1875) — tall brick, clock tower over Park Row.
 {
   const tx = 12.5, tz = 44;
-  const tower = box(5, 18, 5, 0x7e4034, tx, 9, tz);
-  tower.castShadow = true;
+  landmarkBox(5, 6, 5, 1, tx, tz, { ground: 'shop' }); // red brick, six storeys
   box(5.5, 0.6, 5.5, 0x5e3026, tx, 18.3, tz);
-  const upper = box(2.8, 7, 2.8, 0x7e4034, tx, 22.1, tz);
-  upper.castShadow = true;
+  landmarkBox(2.8, 2, 2.8, 1, tx, tz, { yBase: 18.6 }); // the clock tower
   const clock = new THREE.Mesh(new THREE.CircleGeometry(0.7, 14), new THREE.MeshBasicMaterial({ color: 0xefe6d0 }));
   clock.position.set(tx, 23.8, tz + 1.42);
   scene.add(clock);
   const cap = new THREE.Mesh(new THREE.ConeGeometry(2.2, 3.2, 4), lambert(0x4a3a30));
   cap.rotation.y = Math.PI / 4;
-  cap.position.set(tx, 27.2, tz);
+  cap.position.set(tx, 26.2, tz);
   cap.castShadow = true;
   scene.add(cap);
   addCollider(tx, tz, 5, 5);
-  occluders.push(tower);
   landmarkInfo('Tribune Building', 1875,
     `Richard Morris Hunt's brick clock tower for Horace Greeley's New-York
      Tribune was one of the first elevator towers in the world — at 260 feet
      it loomed over Newspaper Row, where every great daily watched City Hall
      across the park.`,
-    tx, tz, 31, { w: 5.5, h: 29, d: 5.5 });
+    tx, tz, 31, { w: 5.5, h: 29, d: 5.5, chart: { dx: 8 } });
 }
 
 // The Western Union Telegraph Building (1875) on lower Broadway.
 {
   const wx = -1.5, wz = 57;
-  const main = box(5.5, 15, 5, 0x6d5b4d, wx, 7.5, wz);
-  main.castShadow = true;
+  landmarkBox(5.5, 5, 5, 4, wx, wz, { ground: 'shop' }); // granite, five storeys
   box(6, 0.6, 5.5, 0x53453a, wx, 15.3, wz);
   const mansard = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.2, 3.4, 4), lambert(0x3f3630));
   mansard.rotation.y = Math.PI / 4;
@@ -1220,39 +1376,36 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   pole.position.set(wx, 20.8, wz);
   scene.add(pole);
   addCollider(wx, wz, 5.5, 5);
-  occluders.push(main);
   landmarkInfo('Western Union Building', 1875,
     `George B. Post's ten-storey telegraph palace on Broadway was, with the
      Tribune, the city's first true skyscraper. Every day at noon a time-ball
      dropped from its mast so the harbor's ships — and the customs men on
      the piers — could set their chronometers.`,
-    wx, wz, 24.5, { w: 6, h: 22, d: 5.5 });
+    wx, wz, 24.5, { w: 6, h: 22, d: 5.5, chart: { dx: -6, dz: 4 } });
 }
 
 // Cooper Union (1859), in whose Great Hall Lincoln spoke in 1860.
 {
   const cx = 19, cz = -4;
-  const block = box(6, 11, 8, 0x6a4a39, cx, 5.5, cz);
-  block.castShadow = true;
-  box(6.5, 0.7, 8.5, 0x52382b, cx, 11.35, cz);
+  landmarkBox(6, 4, 8, 0, cx, cz); // brownstone, four storeys
+  box(6.5, 0.7, 8.5, 0x52382b, cx, 12.35, cz);
   for (let i = -1; i <= 1; i++) { // round-arched bays hinted with piers
-    box(0.6, 9.5, 0.35, 0x7d5a46, cx + i * 2, 4.75, cz + 4.05, scene, false);
+    box(0.6, 11.5, 0.35, 0x7d5a46, cx + i * 2, 5.75, cz + 4.05, scene, false);
   }
   addCollider(cx, cz, 6, 8);
-  occluders.push(block);
   landmarkInfo('Cooper Union', 1859,
     `Peter Cooper's free college of art and science, brownstone over an
      iron frame. In its Great Hall in February 1860 an Illinois lawyer named
      Lincoln gave the speech — “right makes might” — that carried him toward
      the presidency.`,
-    cx, cz, 15.5, { w: 6.5, h: 12.5, d: 8.5 });
+    cx, cz, 16.5, { w: 6.5, h: 13.5, d: 8.5 });
 }
 
 // Union Square (1839), with the equestrian Washington of 1856.
 {
-  parkGreen(new THREE.PlaneGeometry(16, 9), -2, -40);
+  parkGreen(new THREE.PlaneGeometry(16, 5.6), -2, -40); // fills its block; 14th and 17th run past
   for (let i = 0; i < 7; i++) {
-    const tx2 = -9 + Math.random() * 14, tz2 = -43.6 + Math.random() * 7.2;
+    const tx2 = -9 + Math.random() * 14, tz2 = -42.4 + Math.random() * 4.8;
     if (Math.hypot(tx2 + 2, tz2 + 40) > 2.6) tree(tx2, tz2, 0.7 + Math.random() * 0.5);
   }
   const bronze = lambert(0x3a4138);
@@ -1288,23 +1441,20 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 // The Fifth Avenue Hotel (1859), white marble, facing Madison Square.
 {
   const hx = -17, hz = -76;
-  const hotel = box(7, 16, 5.5, 0xe8e0cd, hx, 8, hz);
-  hotel.castShadow = true;
-  box(7.5, 0.7, 6, 0xcdc4ab, hx, 16.35, hz);
-  box(7.1, 0.4, 5.7, 0xb9ad97, hx, 3.4, hz);   // beltcourse
-  box(7.2, 3.4, 5.7, 0xd5ccb6, hx, 1.7, hz);   // arcaded base
+  landmarkBox(7, 5, 5.5, 6, hx, hz, { ground: 'shop' }); // white marble over an arcaded base
+  box(7.5, 0.7, 6, 0xcdc4ab, hx, 15.35, hz);
+  box(7.1, 0.4, 5.7, 0xb9ad97, hx, 3.2, hz);   // beltcourse
   const flag = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3, 5), lambert(0x33302c));
-  flag.position.set(hx + 2.6, 18.2, hz + 1.8);
+  flag.position.set(hx + 2.6, 17.2, hz + 1.8);
   scene.add(flag);
   addCollider(hx, hz, 7, 5.5);
-  occluders.push(hotel);
   landmarkInfo('Fifth Avenue Hotel', 1859,
     `Amos Eno's white-marble palace on Madison Square — mocked as “Eno's
      Folly,” then the most celebrated hotel in America, with the first
      passenger elevator in any hotel. Princes, presidents, and the
      Republican bosses of the Gilded Age held court a block from Melville's
      front door.`,
-    hx, hz, 21, { w: 7.5, h: 18, d: 6 });
+    hx, hz, 20, { w: 7.5, h: 17, d: 6, chart: { dx: -6 } });
 }
 
 // Info for the landmarks that were already on the island.
@@ -1312,7 +1462,7 @@ landmarkInfo('Trinity Church', 1846,
   `Richard Upjohn's brownstone Gothic spire was the tallest thing in New
    York for most of Melville's life — mariners steered by it, and its bells
    rang over Wall Street. Alexander Hamilton lies in its churchyard.`,
-  -15, 40, 28, { w: 7, h: 26, d: 12 });
+  -15, 40, 28, { w: 7, h: 26, d: 12, chart: { dx: -4 } });
 landmarkInfo('Brooklyn Bridge', 1883,
   `The Roeblings' “eighth wonder” opened in May 1883, its towers taller
    than anything but Trinity's spire. The old sailor saw the age of sail
@@ -1372,6 +1522,12 @@ if (tankGeos.length) {
   mesh.castShadow = true;
   scene.add(mesh);
 }
+roofGeos.forEach((geos, i) => {
+  if (!geos.length) return;
+  const mesh = new THREE.Mesh(mergeGeometries(geos, false), lambert(ROOF_TONES[i]));
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+});
 
 /* ---------------- gas lamps ---------------- */
 {
@@ -1514,14 +1670,15 @@ function tree(x, z, s = 1) {
   g.add(trunk, fol);
   g.position.set(x, 0, z);
   scene.add(g);
+  addCollider(x, z, 0.4 * s, 0.4 * s, 0.25);
 }
 
 // Madison Square Park
 {
-  parkGreen(new THREE.PlaneGeometry(20, 11), -1, -74);
+  parkGreen(new THREE.PlaneGeometry(19.4, 10.4), -0.8, -74.3); // 23rd to 26th, over the cut street
   for (let i = 0; i < 11; i++) {
-    const tx = -10 + Math.random() * 18;
-    const tz = -78.6 + Math.random() * 9;
+    const tx = -9.5 + Math.random() * 17.5;
+    const tz = -78.6 + Math.random() * 8.6;
     if (Math.hypot(tx - (-4), tz - (-73)) > 3.2) tree(tx, tz, 0.8 + Math.random() * 0.5);
   }
 }
@@ -1546,42 +1703,30 @@ function tree(x, z, s = 1) {
 
 /* ---------------- landmarks ---------------- */
 
-// Melville's house, 104 E 26th St — brick row house facing the street.
+// Melville's house, 104 E 26th St — brick row house on the north side of
+// the street, its stoop stepping down onto the sidewalk.
 {
-  const hx = 18, hz = -83.5;
-  const house = box(4.4, 9.6, 6, COLORS.brick, hx, 4.8, hz);
-  addCollider(hx, hz, 4.4, 6);
-  box(4.9, 0.6, 6.5, 0x6e4a3a, hx, 9.85, hz); // cornice
-  box(1.2, 2.6, 0.3, 0x274029, hx - 0.9, 1.5, hz + 3.05); // green door
-  box(2.4, 0.6, 1.7, 0xb5a98c, hx - 0.9, 0.3, hz + 3.75); // high stoop
-  // window lintels and sashes on the street face
-  for (const fy of [2.4, 5.4, 8.2]) {
-    for (let wx = -1.3; wx <= 1.3; wx += 1.3) {
-      if (fy < 3 && wx < 0) continue; // door occupies that bay
-      box(0.82, 1.4, 0.12, 0x36302a, hx + wx, fy, hz + 3.02, scene, false);
-      box(0.6, 1.1, 0.13, 0x46525c, hx + wx, fy, hz + 3.03, scene, false);
-    }
-  }
-  house.castShadow = true;
-  occluders.push(house);
+  const hx = 18, hz = -88.5;
+  landmarkBox(4.4, 3, 5, 1, hx, hz, { ground: 'row' }); // three storeys of red brick
+  addCollider(hx, hz, 4.4, 5);
+  box(4.9, 0.6, 5.5, 0x6e4a3a, hx, 9.25, hz); // cornice
+  box(1.2, 2.6, 0.3, 0x274029, hx - 1.1, 1.5, hz + 2.55); // green door
+  box(2.4, 0.6, 0.7, 0xb5a98c, hx - 1.1, 0.3, hz + 3.05); // high stoop
 }
 
 // Madison Square Garden (1890) with its tower and the gilded Diana.
 let diana;
 {
-  const g = box(17, 12, 9.5, 0xc8a583, -4, 6, -86.5);
-  g.castShadow = true;
+  landmarkBox(17, 4, 9.5, 5, -4, -86.5); // yellow brick and terra cotta
   addCollider(-4, -86.5, 17, 9.5);
   box(17.6, 0.8, 10.1, 0xa9886a, -4, 12.4, -86.5);
-  const tower = box(4.6, 30, 4.6, 0xc8a583, 2, 15, -84);
-  tower.castShadow = true;
+  landmarkBox(4.6, 10, 4.6, 5, 2, -84); // the tower
   addCollider(2, -84, 4.6, 4.6);
   box(3.4, 3.2, 3.4, 0xb59478, 2, 31.6, -84); // loggia
   const cap = new THREE.Mesh(new THREE.ConeGeometry(2.2, 3, 8), lambert(0xa9886a));
   cap.position.set(2, 34.8, -84);
   cap.castShadow = true;
   scene.add(cap);
-  occluders.push(g, tower);
   // Diana, gilded, turning like a weathervane
   diana = new THREE.Group();
   const goldMat = new THREE.MeshPhongMaterial({ color: COLORS.gold, emissive: 0x6b5410, shininess: 100 });
@@ -1609,6 +1754,7 @@ let train, trainDir = -1;
   for (let z = -108; z <= 0; z += 10) {
     box(0.7, 6, 0.7, COLORS.iron, EL_X, 3, z);
     box(4.4, 0.5, 0.7, COLORS.iron, EL_X, 5.85, z);
+    addCollider(EL_X, z, 0.7, 0.7, 0.3);
   }
   // station at 26th-ish street: side platforms so the train passes between
   box(1.8, 0.5, 10, COLORS.wood, EL_X - 2.9, 6.85, -58);
@@ -1619,6 +1765,7 @@ let train, trainDir = -1;
   }
   const stair = box(8, 0.35, 1.8, COLORS.wood, EL_X - 5.2, 3.4, -55.2);
   stair.rotation.z = 0.72;
+  addCollider(EL_X - 6.4, -55.2, 3.6, 1.8, 0.3); // the foot of the stair
   // train
   train = new THREE.Group();
   const loco = box(2, 2.2, 4.2, 0x3a352e, 0, 7.6, 4.8, train);
@@ -1721,10 +1868,12 @@ function sailShip(x, z, scale = 1, rotY = 0) {
     }
   }
   g.position.set(x, 0, z);
+  g.rotation.order = 'YXZ'; // heading first, so pitch and roll stay in the hull's frame
   g.rotation.y = rotY;
   g.scale.setScalar(scale);
+  g.userData.stern = -5.5; // where the wake starts, in local units
   scene.add(g);
-  bobbers.push({ obj: g, phase: Math.random() * 6 });
+  bobbers.push({ obj: g, half: 5 * scale, beam: 1.5 * scale });
   return g;
 }
 
@@ -1737,14 +1886,16 @@ function steamShip(x, z, rotY = 0) {
   stack.position.set(0, 3.8, 0.5);
   g.add(stack);
   g.position.set(x, 0, z);
+  g.rotation.order = 'YXZ';
   g.rotation.y = rotY;
+  g.userData.stern = -6.5;
   scene.add(g);
-  bobbers.push({ obj: g, phase: Math.random() * 6 });
+  bobbers.push({ obj: g, half: 6, beam: 1.7 });
   return g;
 }
 
 sailShip(-53, -20, 0.9);            // moored at the customs pier
-sailShip(52.5, -88, 0.85);          // moored at the East River pier
+sailShip(52.5, -86.5, 0.85);        // moored at the East River pier
 // Ships under way: each drifts along one axis, then wraps around for
 // another pass. The steamers trail coal smoke.
 const drifters = [
@@ -1864,10 +2015,11 @@ const clouds = [];
   }
 }
 
-// Coal smoke: one Points cloud shared by the El locomotive and the two
-// moving steamers — a single draw call for every plume in the harbor.
-const smoke = (() => {
-  const N = 130;
+// A cloud of soft particles in one draw call: coal smoke over the harbor,
+// foam churned up behind the ships. Each system has its own tint, size,
+// lifetime and drift; `emit` seeds one particle at a point on a prop.
+function makeParticles({ count, color, size, alpha, life, drift, jitter }) {
+  const N = count;
   const pos = new Float32Array(N * 3);
   const aSize = new Float32Array(N);
   const aAlpha = new Float32Array(N);
@@ -1890,7 +2042,7 @@ const smoke = (() => {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       map: { value: new THREE.CanvasTexture(cv) },
-      color: { value: new THREE.Color(0x6b655c) },
+      color: { value: new THREE.Color(color) },
     },
     vertexShader: `
       attribute float aSize;
@@ -1924,11 +2076,11 @@ const smoke = (() => {
     const p = parts[cursor];
     cursor = (cursor + 1) % N;
     p.age = 0;
-    p.life = 3.2 + Math.random() * 1.4;
-    p.x = tip.x + (Math.random() - 0.5) * 0.3;
+    p.life = life[0] + Math.random() * (life[1] - life[0]);
+    p.x = tip.x + (Math.random() - 0.5) * jitter;
     p.y = tip.y;
-    p.z = tip.z + (Math.random() - 0.5) * 0.3;
-    p.vx = 0.5 + Math.random() * 0.4; // downwind, with the clouds
+    p.z = tip.z + (Math.random() - 0.5) * jitter;
+    p.vx = drift[0] + Math.random() * (drift[1] - drift[0]);
     p.vy = vy * (0.85 + Math.random() * 0.3);
     p.vz = (Math.random() - 0.5) * 0.3;
   }
@@ -1945,15 +2097,23 @@ const smoke = (() => {
       pos[i * 3] = p.x;
       pos[i * 3 + 1] = p.y;
       pos[i * 3 + 2] = p.z;
-      aSize[i] = 1.4 + k * 4.2;
-      aAlpha[i] = k < 0.12 ? (k / 0.12) * 0.4 : 0.4 * (1 - (k - 0.12) / 0.88);
+      aSize[i] = size[0] + k * (size[1] - size[0]);
+      aAlpha[i] = k < 0.12 ? (k / 0.12) * alpha : alpha * (1 - (k - 0.12) / 0.88);
     }
     geo.attributes.position.needsUpdate = true;
     geo.attributes.aSize.needsUpdate = true;
     geo.attributes.aAlpha.needsUpdate = true;
   }
   return { emit, update };
-})();
+}
+const smoke = makeParticles({
+  count: 130, color: 0x6b655c, size: [1.4, 5.6], alpha: 0.4, life: [3.2, 4.6],
+  drift: [0.5, 0.9], jitter: 0.3, // downwind, with the clouds
+});
+const wake = makeParticles({
+  count: 160, color: 0xf4f1e6, size: [0.9, 3.4], alpha: 0.5, life: [2.4, 3.8],
+  drift: [0, 0], jitter: 1.4, // foam stays where the hull churned it
+});
 // every smoking prop: emit cadence and the funnel tip in local coordinates
 const smokeSources = [
   { obj: train, period: 0.3, tipY: 9.95, tipZ: 6, vy: 2.4, t: 0 },
@@ -1961,6 +2121,8 @@ const smokeSources = [
     .filter((d) => d.smokes)
     .map((d) => ({ obj: d.obj, period: 0.45, tipY: 5.1, tipZ: 0.5, vy: 1.7, t: 0 })),
 ];
+// every ship under way trails foam from its stern
+const wakeSources = drifters.map((d) => ({ obj: d.obj, period: 0.14, tipY: 0.45, tipZ: d.obj.userData.stern, vy: 0, t: 0 }));
 
 // "The Tide Turns": once the chart is complete the whole island settles
 // into a permanent golden hour. warmth runs 0 (day) to 1 (dusk).
@@ -2043,6 +2205,16 @@ legL.position.set(-0.24, 0.95, 0);
 legR.position.set(0.24, 0.95, 0);
 legL.castShadow = legR.castShadow = true;
 player.add(legL, legR);
+// coat sleeves, hinged at the shoulder so they swing with the stride
+const armGeo = new THREE.BoxGeometry(0.22, 0.95, 0.22);
+armGeo.translate(0, -0.42, 0);
+const armL = new THREE.Mesh(armGeo, lambert(0x33302c));
+const armR = armL.clone();
+armL.position.set(-0.74, 2.35, 0);
+armR.position.set(0.74, 2.35, 0);
+armL.castShadow = armR.castShadow = true;
+player.add(armL, armR);
+player.rotation.order = 'YXZ'; // heading first, so the walking lean stays in his own frame
 player.scale.setScalar(0.58); // a man among five-storey buildings
 player.position.set(0, 0, 70);
 player.rotation.y = Math.PI; // facing north, up the island
@@ -2077,10 +2249,13 @@ const keys = {};
 window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (finale) { skipFinale(); return; }
+  if (e.code === 'Escape') { closeCard(); closeEpilogue(); return; }
   if ((e.code === 'KeyE' || e.code === 'Enter') && state.started) tryVisit();
-  if (e.code === 'KeyM' && state.started) toggleView();
+  if (e.code === 'KeyM' && state.started && !state.modal) toggleView();
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+// a key held while the tab loses focus would otherwise stay "down" forever
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
 // Touch: left side of the screen is a walk joystick, everywhere else
 // (and the mouse on desktop) drags the camera around the player.
@@ -2096,6 +2271,8 @@ function onUi(e) {
 window.addEventListener('pointerdown', (e) => {
   if (finale) { skipFinale(); return; }
   if (!state.started || state.modal || onUi(e)) return;
+  // keep receiving the drag even if the pointer leaves the window
+  try { e.target.setPointerCapture(e.pointerId); } catch { /* not a capturable target */ }
   const wantsJoy = e.pointerType === 'touch' && e.clientX < window.innerWidth * 0.45;
   if (wantsJoy && joy.id === null) {
     if (touchHintHide) touchHintHide();
@@ -2146,6 +2323,11 @@ function endPointer(e) {
 }
 window.addEventListener('pointerup', endPointer);
 window.addEventListener('pointercancel', endPointer);
+// a mouse wheel brings the camera in close or lets it hang back
+window.addEventListener('wheel', (e) => {
+  if (!state.started || state.modal || state.view !== 'street' || onUi(e)) return;
+  cam.dist = Math.min(16, Math.max(6, cam.dist + e.deltaY * 0.012));
+}, { passive: true });
 
 /* ---------------- UI ---------------- */
 
@@ -2183,6 +2365,7 @@ const viewBtn = document.getElementById('view-btn');
 function toggleView() {
   state.view = state.view === 'street' ? 'chart' : 'street';
   viewBtn.textContent = state.view === 'street' ? 'Chart View' : 'Street View';
+  hudEl.classList.toggle('chart', state.view === 'chart'); // the title steps back from the map
   applyShadowFrustum(state.view);
 }
 viewBtn.addEventListener('click', toggleView);
@@ -2209,7 +2392,6 @@ function toast(msg, ms = 4200) {
 
 // A returning walker is greeted as one — and may tear up the old chart.
 if (save.charted.length > 0) {
-  document.getElementById('start-btn').textContent = 'Return ashore';
   const note = document.createElement('p');
   note.className = 'save-note';
   note.textContent = `${save.charted.length} of ${SITES.length} sites already charted · `;
@@ -2376,17 +2558,21 @@ function openCard(marker) {
   }
   cardBody.innerHTML = s.body.map((p) => `<p>${p}</p>`).join('');
   cardArtifact.style.display = '';
-  const firstVisit = !marker.visited;
-  cardArtifact.innerHTML = firstVisit
-    ? `<b>Artifact found:</b> ${s.artifact}`
-    : `<b>Collected:</b> ${s.artifact}`;
-  cardArtifact.classList.toggle('stamped', firstVisit);
+  // The story can be read from anywhere — the chart, or across the street —
+  // but a site is charted only on foot, standing at its marker.
+  const charting = !marker.visited && state.nearSite === marker;
+  cardArtifact.innerHTML = marker.visited
+    ? `<b>Collected:</b> ${s.artifact}`
+    : charting
+      ? `<b>Artifact found:</b> ${s.artifact}`
+      : `<b>Uncharted</b> — walk to this marker to collect its artifact.`;
+  cardArtifact.classList.toggle('stamped', charting);
   cardEl.classList.remove('hidden');
-  if (firstVisit) chartSite(marker);
+  if (charting) chartSite(marker);
 }
 
-document.getElementById('card-close').addEventListener('click', () => {
-  if (ghostClick()) return;
+function closeCard() {
+  if (cardEl.classList.contains('hidden')) return;
   cardEl.classList.add('hidden');
   state.modal = false;
   if (pendingPinFx) {
@@ -2400,6 +2586,9 @@ document.getElementById('card-close').addEventListener('click', () => {
     // onto the chart before the camera lifts away
     finaleQueued = true;
   }
+}
+document.getElementById('card-close').addEventListener('click', () => {
+  if (!ghostClick()) closeCard();
 });
 
 function showEpilogue() {
@@ -2473,16 +2662,20 @@ function updateFinale(dt) {
     showEpilogue();
   }
 }
-document.getElementById('epilogue-close').addEventListener('click', () => {
-  if (ghostClick()) return;
+function closeEpilogue() {
+  if (epilogueEl.classList.contains('hidden')) return;
   epilogueEl.classList.add('hidden');
   state.modal = false;
   toast('The island is yours now. Revisit any marker to reread its story.');
+}
+document.getElementById('epilogue-close').addEventListener('click', () => {
+  if (!ghostClick()) closeEpilogue();
 });
 
 /* ---------------- movement & loop ---------------- */
 
 const SPEED = 7.5;
+const vel = { x: 0, z: 0 }; // the walker's eased velocity, as a fraction of SPEED
 let needleAngle = 0; // continuous compass-needle angle, radians
 let walkPhase = 0;
 let lastStepSign = true; // footstep trigger: sign of the leg swing
@@ -2549,7 +2742,7 @@ function angleLerp(a, b, t) {
   return a + d * t;
 }
 
-const wPos = water.geometry.attributes.position;
+const _fore = new THREE.Vector2(), _beam = new THREE.Vector2();
 
 function animate() {
   requestAnimationFrame(animate);
@@ -2561,27 +2754,37 @@ function animate() {
   // the camera's ground-plane basis, shared by movement and the compass
   const fwdX = -Math.sin(effYaw), fwdZ = -Math.cos(effYaw);
   const rightX = Math.cos(effYaw), rightZ = -Math.sin(effYaw);
-  let moving = 0, dirX = 0, dirZ = 0;
+  // the input is a goal velocity; the walker eases into his stride and
+  // takes a short step to stop, rather than snapping between the two
+  let goalX = 0, goalZ = 0;
   if (state.started && !state.modal) {
     const [mx, mz] = moveInput();
-    moving = Math.hypot(mx, mz);
-    if (moving > 0.01) {
-      dirX = rightX * mx + fwdX * -mz;
-      dirZ = rightZ * mx + fwdZ * -mz;
-      let nx = player.position.x + dirX * SPEED * dt;
-      let nz = player.position.z + dirZ * SPEED * dt;
-      if (!isWalkable(nx, player.position.z)) nx = player.position.x;
-      if (!isWalkable(nx, nz)) nz = player.position.z;
-      [nx, nz] = collide(nx, nz);
-      if (isWalkable(nx, nz)) player.position.set(nx, 0, nz);
-      player.rotation.y = angleLerp(player.rotation.y, Math.atan2(dirX, dirZ), 0.2);
-    }
+    goalX = rightX * mx + fwdX * -mz;
+    goalZ = rightZ * mx + fwdZ * -mz;
   }
-  walkPhase += dt * (4 + moving * 9);
-  const swing = moving > 0.01 ? 0.62 : 0;
+  const wantsToMove = Math.hypot(goalX, goalZ) > 0.01;
+  const ease = 1 - Math.pow(wantsToMove ? 0.0001 : 0.000001, dt);
+  vel.x += (goalX - vel.x) * ease;
+  vel.z += (goalZ - vel.z) * ease;
+  let moving = Math.hypot(vel.x, vel.z);
+  if (moving < 0.01) { vel.x = vel.z = 0; moving = 0; }
+  if (moving > 0) {
+    let nx = player.position.x + vel.x * SPEED * dt;
+    let nz = player.position.z + vel.z * SPEED * dt;
+    if (!isWalkable(nx, player.position.z)) nx = player.position.x;
+    if (!isWalkable(nx, nz)) nz = player.position.z;
+    [nx, nz] = collide(nx, nz);
+    if (isWalkable(nx, nz)) player.position.set(nx, 0, nz);
+    player.rotation.y = angleLerp(player.rotation.y, Math.atan2(vel.x, vel.z), 1 - Math.pow(0.00001, dt));
+  }
+  walkPhase += dt * (4 + moving * 7);
+  const swing = moving > 0.01 ? 0.62 * Math.min(1, moving * 1.5) : 0;
   legL.rotation.x = Math.sin(walkPhase) * swing;
   legR.rotation.x = -Math.sin(walkPhase) * swing;
-  player.position.y = moving > 0.01 ? Math.abs(Math.sin(walkPhase)) * 0.1 : 0;
+  armL.rotation.x = -Math.sin(walkPhase) * swing * 0.7; // arms swing against the legs
+  armR.rotation.x = Math.sin(walkPhase) * swing * 0.7;
+  player.rotation.x = moving * 0.07; // a slight lean into the walk
+  player.position.y = moving > 0.01 ? Math.abs(Math.sin(walkPhase)) * 0.1 * Math.min(1, moving * 1.5) : 0;
   // each leg-swing crossing is a footfall — planks on the piers, stone ashore
   const stepSign = Math.sin(walkPhase) >= 0;
   if (moving > 0.01 && stepSign !== lastStepSign) {
@@ -2609,8 +2812,8 @@ function animate() {
     _camPos.copy(CHART_CAM_POS);
     _lookGoal.copy(CHART_LOOK_AT);
   } else {
-    if (moving > 0.01 && t - cam.lastDrag > 2.2) {
-      cam.yaw = angleLerp(cam.yaw, Math.atan2(dirX, dirZ) + Math.PI, 1 - Math.pow(0.55, dt));
+    if (moving > 0.05 && t - cam.lastDrag > 2.2) {
+      cam.yaw = angleLerp(cam.yaw, Math.atan2(vel.x, vel.z) + Math.PI, 1 - Math.pow(0.55, dt));
     }
     _head.set(player.position.x, 1.9, player.position.z);
     _toCam.set(
@@ -2742,12 +2945,16 @@ function animate() {
     let o, s;
     if (chartView) {
       o = 0.95;
-      s = 2.6;
+      s = 2.0;
+      L.sprite.position.x = L.x + L.cdx;
+      L.sprite.position.z = L.z + L.cdz;
     } else {
       const d = Math.hypot(player.position.x - L.x, player.position.z - L.z);
       const fadeIn = L.range - 16;
       o = d < fadeIn ? 1 : d > L.range ? 0 : 1 - (d - fadeIn) / 16;
       s = 1;
+      L.sprite.position.x = L.x;
+      L.sprite.position.z = L.z;
     }
     L.sprite.material.opacity = o;
     L.sprite.visible = o > 0.02;
@@ -2758,11 +2965,10 @@ function animate() {
   for (const w of wanderers) {
     const nz = w.z + w.dir * w.speed * dt;
     const [cx2, cz2] = collide(w.x, nz);
-    if (Math.abs(cz2 - nz) > 1e-4) {
-      w.dir *= -1; // blocked by a stoop, wagon, or wall — turn back
+    if (Math.abs(cz2 - nz) > 1e-4 || Math.abs(cx2 - w.x) > 1e-4) {
+      w.dir *= -1; // blocked by a stoop, wagon, or wall — turn back, keep the lane
     } else {
-      w.z = cz2;
-      w.x = cx2;
+      w.z = nz;
     }
     if (w.z < w.z0) { w.z = w.z0; w.dir = 1; }
     if (w.z > w.z1) { w.z = w.z1; w.dir = -1; }
@@ -2770,21 +2976,24 @@ function animate() {
     w.g.rotation.y = w.dir > 0 ? 0 : Math.PI;
   }
 
-  // --- water: a long swell with wind-chop riding on top ---
-  for (let i = 0; i < wPos.count; i++) {
-    const x = waterBase[i * 3], z = waterBase[i * 3 + 2];
-    wPos.array[i * 3 + 1] =
-      Math.sin(x * 0.09 + t * 0.9) * Math.cos(z * 0.07 + t * 0.7) * 0.28 +
-      Math.sin(x * 0.23 - t * 1.6) * Math.sin(z * 0.19 + t * 1.2) * 0.11;
-  }
-  wPos.needsUpdate = true;
-  // no normal recompute: the material is flat-shaded, so the shader derives
-  // face normals from position derivatives and never reads the attribute
+  // --- water: the swell runs on the GPU; the surf breathes with it ---
+  waterUniforms.uTime.value = t;
+  foam.tex.offset.y = (t * 0.22) % 1;
+  foam.mat.opacity = 0.62 + 0.18 * Math.sin(t * 1.1);
 
-  // --- moving props ---
+  // --- moving props: every hull rides the swell, pitching over the crests
+  // fore-and-aft and rolling with the chop across the beam ---
   for (const b of bobbers) {
-    b.obj.position.y = Math.sin(t * 0.9 + b.phase) * 0.18;
-    b.obj.rotation.z = Math.sin(t * 0.7 + b.phase) * 0.02;
+    const p = b.obj.position, yaw = b.obj.rotation.y;
+    _fore.set(Math.sin(yaw), Math.cos(yaw));     // local +z (the bow) in world x/z
+    _beam.set(Math.cos(yaw), -Math.sin(yaw));    // local +x (starboard)
+    const hF = waveHeight(p.x + _fore.x * b.half, p.z + _fore.y * b.half, t);
+    const hA = waveHeight(p.x - _fore.x * b.half, p.z - _fore.y * b.half, t);
+    const hR = waveHeight(p.x + _beam.x * b.beam, p.z + _beam.y * b.beam, t);
+    const hL = waveHeight(p.x - _beam.x * b.beam, p.z - _beam.y * b.beam, t);
+    p.y = (hF + hA + hR + hL) / 4 - 0.2; // the waterline a third of the way up the hull
+    b.obj.rotation.x = Math.atan2(hF - hA, 2 * b.half) * 0.8;
+    b.obj.rotation.z = Math.atan2(hR - hL, 2 * b.beam) * 0.6;
   }
   for (const d of drifters) {
     const p = d.obj.position;
@@ -2793,8 +3002,9 @@ function animate() {
   }
 
   train.position.z += trainDir * dt * 9;
-  if (train.position.z < -103) { train.position.z = -103; trainDir = 1; train.rotation.y = Math.PI; trainWhistle(); }
-  if (train.position.z > -8) { train.position.z = -8; trainDir = -1; train.rotation.y = 0; trainWhistle(); }
+  // the locomotive sits at local +z, so it faces -z (north) when turned about
+  if (train.position.z < -103) { train.position.z = -103; trainDir = 1; train.rotation.y = 0; trainWhistle(); }
+  if (train.position.z > -8) { train.position.z = -8; trainDir = -1; train.rotation.y = Math.PI; trainWhistle(); }
 
   // --- coal smoke from the locomotive and the two moving steamers ---
   for (const s of smokeSources) {
@@ -2802,10 +3012,15 @@ function animate() {
     while (s.t > s.period) { s.t -= s.period; smoke.emit(s.obj, 0, s.tipY, s.tipZ, s.vy); }
   }
   smoke.update(dt);
+  for (const s of wakeSources) {
+    s.t += dt;
+    while (s.t > s.period) { s.t -= s.period; wake.emit(s.obj, 0, s.tipY, s.tipZ, 0); }
+  }
+  wake.update(dt);
 
   diana.rotation.y = t * 0.4;
 
-  whale.position.y = -0.7 + Math.sin(t * 0.5) * 0.35;
+  whale.position.y = waveHeight(whale.position.x, whale.position.z, t) - 0.15 + Math.sin(t * 0.5) * 0.35;
   const spoutT = (t % 7) / 7;
   spout.visible = spoutT < 0.3;
   if (spout.visible) {
@@ -2868,6 +3083,25 @@ for (const id of save.charted) {
 if (save.epilogueShown) {
   state.epilogueShown = true;
   applyDusk(1); // the tide turned in an earlier session; the dusk holds
+}
+
+// The web font usually lands after the labels were first inked; ink them again.
+if (document.fonts) {
+  Promise.all([
+    document.fonts.load("italic 600 72px 'EB Garamond'"),
+    document.fonts.load("500 84px 'EB Garamond'"),
+    document.fonts.load("600 64px 'EB Garamond'"),
+  ]).catch(() => {}).then(() => document.fonts.ready).then(() => {
+    for (const r of labelRedraws) { r.draw(); r.tex.needsUpdate = true; }
+  });
+}
+
+// The island is built; the gangway can open.
+{
+  const startBtn = document.getElementById('start-btn');
+  startBtn.textContent = save.charted.length > 0 ? 'Return ashore' : 'Go ashore';
+  startBtn.disabled = false;
+  document.getElementById('load-note').classList.add('hidden'); // in case the slow-load note had appeared
 }
 
 animate();

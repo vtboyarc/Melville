@@ -116,6 +116,8 @@ button {
 }
 button:hover { transform: translateY(-1px); }
 button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7d2418; }
+button:disabled { opacity: 0.55; cursor: wait; }
+button:disabled:hover, button:disabled:active { transform: none; box-shadow: 0 3px 0 #7d2418; }
 
 /* ---------- HUD ---------- */
 #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }

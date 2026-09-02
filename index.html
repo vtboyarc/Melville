@@ -46,7 +46,8 @@
         <span><b>Tap</b> any pin or landmark to read about it</span>
         <span>On touch screens: left thumb walks, right thumb looks</span>
       </div>
-      <button id="start-btn">Go ashore</button>
+      <button id="start-btn" disabled>Charting the island&hellip;</button>
+      <p id="load-note" class="save-note hidden">Still charting the island&hellip; this page needs a connection to cdn.jsdelivr.net to load Three.js.</p>
       <div class="rule-bottom"></div>
     </div>
   </div>
@@ -60,7 +61,7 @@
     <details id="chart-key" open>
       <summary>Chart Key</summary>
       <ol id="key-list"></ol>
-      <div class="key-note">Tap any red pin or named landmark&nbsp;&mdash; on the streets or from the chart view&nbsp;&mdash; to read its story.</div>
+      <div class="key-note">Tap any red pin or named landmark&nbsp;&mdash; on the streets or from the chart view&nbsp;&mdash; to read its story. A site is charted only on foot, at its marker.</div>
     </details>
     <div id="compass" title="Points toward the nearest uncharted site">
       <div id="compass-arrow"></div>
@@ -109,6 +110,14 @@
   <!-- Touch joystick -->
   <div id="joystick" class="hidden"><div id="stick"></div></div>
 
+  <script>
+    // If the island has not been built after a while, say why it might not be.
+    setTimeout(() => {
+      if (document.getElementById('start-btn').disabled) {
+        document.getElementById('load-note').classList.remove('hidden');
+      }
+    }, 12000);
+  </script>
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>

@@ -48,7 +48,7 @@ export const SITES = [
     num: 1,
     title: 'The House — 104 East 26th Street',
     dates: '1863 – 1891',
-    pos: { x: 18, z: -78 },
+    pos: { x: 18, z: -81 }, // the sidewalk across 26th Street from the stoop
     body: [
       `In 1863 Melville bought this three-story brick row house — roughly
        twenty by forty-five feet — from his brother Allan, and lived here for

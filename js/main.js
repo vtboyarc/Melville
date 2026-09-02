@@ -47,8 +47,8 @@ for (let z = 12; z >= -104; z -= 8) STREETS.push(z);
 
 const EL_X = 30; // Third Avenue El runs along x = 30, z in [-109, 0]
 
-const CLEAR_CIRCLES = SITES.map((s) => ({ x: s.pos.x, z: s.pos.z, r: 8.5 }));
-CLEAR_CIRCLES.push({ x: 18, z: -84, r: 5.5 });   // the house itself
+const CLEAR_CIRCLES = SITES.map((s) => ({ x: s.pos.x, z: s.pos.z, r: 6 }));
+CLEAR_CIRCLES.push({ x: 18, z: -88.5, r: 4.5 }); // the house itself
 CLEAR_CIRCLES.push({ x: -8, z: 91, r: 6 });      // Castle Garden
 CLEAR_CIRCLES.push({ x: 19, z: 46, r: 7 });      // bridge approach
 CLEAR_CIRCLES.push({ x: 2, z: 48, r: 10 });      // City Hall and its park
@@ -61,6 +61,16 @@ const CLEAR_RECTS = [
   { x0: -15, x1: 7, z0: -93, z1: -80 },   // Madison Square Garden block
   { x0: -12, x1: 10, z0: -80, z1: -68 },  // Madison Square Park
   { x0: -11, x1: 7, z0: -45, z1: -35 },   // Union Square
+];
+// Footprints that interrupt the street grid — the landmarks and parks that
+// take more than a block. Roads and sidewalks stop at their edges instead
+// of running underneath them.
+const STREET_CUTS = [
+  { x0: -13, x1: 5, z0: -91, z1: -81 },          // Madison Square Garden and its tower
+  { x0: -10.5, x1: 8.9, z0: -79.5, z1: -69 },    // Madison Square Park
+  { x0: -20.5, x1: -13.5, z0: -78.75, z1: -73.25 }, // Fifth Avenue Hotel
+  { x0: 16, x1: 22, z0: -8, z1: 0 },             // Cooper Union
+  { x0: -10, x1: 6, z0: -42.8, z1: -37.2 },      // Union Square
 ];
 
 const DOWNTOWN_PATHS = [
@@ -236,17 +246,26 @@ function cylBetween(p1, p2, r, color, parent = scene) {
   return mesh;
 }
 
+// Every canvas label is inked at load, usually before the web font has
+// arrived; each keeps its draw routine so it can be inked again afterwards.
+const labelRedraws = [];
+
 function makeTextTexture(text, { size = 72, color = 'rgba(43,38,32,0.55)', italic = true } = {}) {
   const [cv, ctx] = canvas2d(1024, 144);
-  ctx.font = `${italic ? 'italic ' : ''}600 ${size}px 'EB Garamond', Georgia, serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = color;
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '14px';
-  ctx.fillText(text, 512, 76);
+  const draw = () => {
+    ctx.clearRect(0, 0, 1024, 144);
+    ctx.font = `${italic ? 'italic ' : ''}600 ${size}px 'EB Garamond', Georgia, serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '14px';
+    ctx.fillText(text, 512, 76);
+  };
+  draw();
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
+  labelRedraws.push({ tex, draw });
   return tex;
 }
 
@@ -262,20 +281,25 @@ function waterLabel(text, x, z, rotY = 0, width = 42) {
 
 function makeNumberSprite(n) {
   const [cv, ctx] = canvas2d(128, 128);
-  ctx.beginPath();
-  ctx.arc(64, 64, 52, 0, Math.PI * 2);
-  ctx.fillStyle = '#b23a2c';
-  ctx.fill();
-  ctx.lineWidth = 6;
-  ctx.strokeStyle = '#efe6d0';
-  ctx.stroke();
-  ctx.font = `600 64px 'EB Garamond', Georgia, serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#efe6d0';
-  ctx.fillText(String(n), 64, 68);
+  const draw = () => {
+    ctx.clearRect(0, 0, 128, 128);
+    ctx.beginPath();
+    ctx.arc(64, 64, 52, 0, Math.PI * 2);
+    ctx.fillStyle = '#b23a2c';
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#efe6d0';
+    ctx.stroke();
+    ctx.font = `600 64px 'EB Garamond', Georgia, serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#efe6d0';
+    ctx.fillText(String(n), 64, 68);
+  };
+  draw();
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
+  labelRedraws.push({ tex, draw });
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: true }));
   sprite.scale.set(3.6, 3.6, 1);
   return sprite;
@@ -373,18 +397,46 @@ function streetPlane(len, wide, alongX = true) {
   return m;
 }
 
+// Split the span [a, b] of a road whose centre line sits at `line` on the
+// other axis around every STREET_CUTS rect that straddles that line; stubs
+// shorter than three units are dropped rather than left as slivers.
+function cutSpan(a, b, line, alongX) {
+  let spans = [[a, b]];
+  for (const c of STREET_CUTS) {
+    const [l0, l1, s0, s1] = alongX ? [c.z0, c.z1, c.x0, c.x1] : [c.x0, c.x1, c.z0, c.z1];
+    if (line < l0 || line > l1) continue;
+    const next = [];
+    for (const [p, q] of spans) {
+      if (s1 <= p || s0 >= q) { next.push([p, q]); continue; }
+      if (s0 > p) next.push([p, s0]);
+      if (s1 < q) next.push([s1, q]);
+    }
+    spans = next;
+  }
+  return spans.filter(([p, q]) => q - p >= 3);
+}
+
 const streetSegs = []; // east-west: { z, x0, x1 }
 const aveSegs = [];    // north-south: { x, z0, z1 }
+function addStreet(z, x0, x1) {
+  const m = streetPlane(x1 - x0, 2.2);
+  m.position.set((x0 + x1) / 2, 0.06, z);
+  scene.add(m);
+  streetSegs.push({ z, x0, x1 });
+}
+function addAvenue(x, z0, z1) {
+  const m = streetPlane(z1 - z0, 2.8, false);
+  m.position.set(x, 0.05, (z0 + z1) / 2);
+  scene.add(m);
+  aveSegs.push({ x, z0, z1 });
+}
 for (const z of STREETS) {
   let xmin = Infinity, xmax = -Infinity;
   for (let x = -45; x <= 45; x += 0.5) {
     if (pointInPoly(x, z)) { xmin = Math.min(xmin, x); xmax = Math.max(xmax, x); }
   }
   if (xmax - xmin > 6) {
-    const m = streetPlane(xmax - xmin - 2, 2.2);
-    m.position.set((xmin + xmax) / 2, 0.06, z);
-    scene.add(m);
-    streetSegs.push({ z, x0: xmin + 1, x1: xmax - 1 });
+    for (const [x0, x1] of cutSpan(xmin + 1, xmax - 1, z, true)) addStreet(z, x0, x1);
   }
 }
 for (const x of AVENUES) {
@@ -393,10 +445,7 @@ for (const x of AVENUES) {
     if (pointInPoly(x, z)) { zmin = Math.min(zmin, z); zmax = Math.max(zmax, z); }
   }
   if (zmax - zmin > 6) {
-    const m = streetPlane(zmax - zmin - 2, 2.8, false);
-    m.position.set(x, 0.05, (zmin + zmax) / 2);
-    scene.add(m);
-    aveSegs.push({ x, z0: zmin + 1, z1: zmax - 1 });
+    for (const [z0, z1] of cutSpan(zmin + 1, zmax - 1, x, false)) addAvenue(x, z0, z1);
   }
 }
 
@@ -975,19 +1024,24 @@ function landmarkLabel(text, x, y, z, range = 34) {
   cv.width = w;
   cv.height = 160;
   ctx = cv.getContext('2d');
-  ctx.font = font;
-  if ('letterSpacing' in ctx) ctx.letterSpacing = '12px';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.lineWidth = 18;
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = 'rgba(239,230,208,0.85)';
-  ctx.strokeText(text, w / 2, 84);
-  ctx.fillStyle = 'rgba(43,38,32,0.95)';
-  ctx.fillText(text, w / 2, 84);
+  const draw = () => {
+    ctx.clearRect(0, 0, w, 160);
+    ctx.font = font;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '12px';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 18;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(239,230,208,0.85)';
+    ctx.strokeText(text, w / 2, 84);
+    ctx.fillStyle = 'rgba(43,38,32,0.95)';
+    ctx.fillText(text, w / 2, 84);
+  };
+  draw();
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
+  labelRedraws.push({ tex, draw });
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
   sprite.renderOrder = 5;
   sprite.position.set(x, y, z);
@@ -1250,9 +1304,9 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 
 // Union Square (1839), with the equestrian Washington of 1856.
 {
-  parkGreen(new THREE.PlaneGeometry(16, 9), -2, -40);
+  parkGreen(new THREE.PlaneGeometry(16, 5.6), -2, -40); // fills its block; 14th and 17th run past
   for (let i = 0; i < 7; i++) {
-    const tx2 = -9 + Math.random() * 14, tz2 = -43.6 + Math.random() * 7.2;
+    const tx2 = -9 + Math.random() * 14, tz2 = -42.4 + Math.random() * 4.8;
     if (Math.hypot(tx2 + 2, tz2 + 40) > 2.6) tree(tx2, tz2, 0.7 + Math.random() * 0.5);
   }
   const bronze = lambert(0x3a4138);
@@ -1514,14 +1568,15 @@ function tree(x, z, s = 1) {
   g.add(trunk, fol);
   g.position.set(x, 0, z);
   scene.add(g);
+  addCollider(x, z, 0.4 * s, 0.4 * s, 0.25);
 }
 
 // Madison Square Park
 {
-  parkGreen(new THREE.PlaneGeometry(20, 11), -1, -74);
+  parkGreen(new THREE.PlaneGeometry(19.4, 10.4), -0.8, -74.3); // 23rd to 26th, over the cut street
   for (let i = 0; i < 11; i++) {
-    const tx = -10 + Math.random() * 18;
-    const tz = -78.6 + Math.random() * 9;
+    const tx = -9.5 + Math.random() * 17.5;
+    const tz = -78.6 + Math.random() * 8.6;
     if (Math.hypot(tx - (-4), tz - (-73)) > 3.2) tree(tx, tz, 0.8 + Math.random() * 0.5);
   }
 }
@@ -1546,20 +1601,21 @@ function tree(x, z, s = 1) {
 
 /* ---------------- landmarks ---------------- */
 
-// Melville's house, 104 E 26th St — brick row house facing the street.
+// Melville's house, 104 E 26th St — brick row house on the north side of
+// the street, its stoop stepping down onto the sidewalk.
 {
-  const hx = 18, hz = -83.5;
-  const house = box(4.4, 9.6, 6, COLORS.brick, hx, 4.8, hz);
-  addCollider(hx, hz, 4.4, 6);
-  box(4.9, 0.6, 6.5, 0x6e4a3a, hx, 9.85, hz); // cornice
-  box(1.2, 2.6, 0.3, 0x274029, hx - 0.9, 1.5, hz + 3.05); // green door
-  box(2.4, 0.6, 1.7, 0xb5a98c, hx - 0.9, 0.3, hz + 3.75); // high stoop
+  const hx = 18, hz = -88.5;
+  const house = box(4.4, 9.6, 5, COLORS.brick, hx, 4.8, hz);
+  addCollider(hx, hz, 4.4, 5);
+  box(4.9, 0.6, 5.5, 0x6e4a3a, hx, 9.85, hz); // cornice
+  box(1.2, 2.6, 0.3, 0x274029, hx - 0.9, 1.5, hz + 2.55); // green door
+  box(2.4, 0.6, 0.7, 0xb5a98c, hx - 0.9, 0.3, hz + 3.05); // high stoop
   // window lintels and sashes on the street face
   for (const fy of [2.4, 5.4, 8.2]) {
     for (let wx = -1.3; wx <= 1.3; wx += 1.3) {
       if (fy < 3 && wx < 0) continue; // door occupies that bay
-      box(0.82, 1.4, 0.12, 0x36302a, hx + wx, fy, hz + 3.02, scene, false);
-      box(0.6, 1.1, 0.13, 0x46525c, hx + wx, fy, hz + 3.03, scene, false);
+      box(0.82, 1.4, 0.12, 0x36302a, hx + wx, fy, hz + 2.52, scene, false);
+      box(0.6, 1.1, 0.13, 0x46525c, hx + wx, fy, hz + 2.53, scene, false);
     }
   }
   house.castShadow = true;
@@ -1609,6 +1665,7 @@ let train, trainDir = -1;
   for (let z = -108; z <= 0; z += 10) {
     box(0.7, 6, 0.7, COLORS.iron, EL_X, 3, z);
     box(4.4, 0.5, 0.7, COLORS.iron, EL_X, 5.85, z);
+    addCollider(EL_X, z, 0.7, 0.7, 0.3);
   }
   // station at 26th-ish street: side platforms so the train passes between
   box(1.8, 0.5, 10, COLORS.wood, EL_X - 2.9, 6.85, -58);
@@ -1619,6 +1676,7 @@ let train, trainDir = -1;
   }
   const stair = box(8, 0.35, 1.8, COLORS.wood, EL_X - 5.2, 3.4, -55.2);
   stair.rotation.z = 0.72;
+  addCollider(EL_X - 6.4, -55.2, 3.6, 1.8, 0.3); // the foot of the stair
   // train
   train = new THREE.Group();
   const loco = box(2, 2.2, 4.2, 0x3a352e, 0, 7.6, 4.8, train);
@@ -1744,7 +1802,7 @@ function steamShip(x, z, rotY = 0) {
 }
 
 sailShip(-53, -20, 0.9);            // moored at the customs pier
-sailShip(52.5, -88, 0.85);          // moored at the East River pier
+sailShip(52.5, -86.5, 0.85);        // moored at the East River pier
 // Ships under way: each drifts along one axis, then wraps around for
 // another pass. The steamers trail coal smoke.
 const drifters = [
@@ -2077,10 +2135,13 @@ const keys = {};
 window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (finale) { skipFinale(); return; }
+  if (e.code === 'Escape') { closeCard(); closeEpilogue(); return; }
   if ((e.code === 'KeyE' || e.code === 'Enter') && state.started) tryVisit();
-  if (e.code === 'KeyM' && state.started) toggleView();
+  if (e.code === 'KeyM' && state.started && !state.modal) toggleView();
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+// a key held while the tab loses focus would otherwise stay "down" forever
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
 // Touch: left side of the screen is a walk joystick, everywhere else
 // (and the mouse on desktop) drags the camera around the player.
@@ -2096,6 +2157,8 @@ function onUi(e) {
 window.addEventListener('pointerdown', (e) => {
   if (finale) { skipFinale(); return; }
   if (!state.started || state.modal || onUi(e)) return;
+  // keep receiving the drag even if the pointer leaves the window
+  try { e.target.setPointerCapture(e.pointerId); } catch { /* not a capturable target */ }
   const wantsJoy = e.pointerType === 'touch' && e.clientX < window.innerWidth * 0.45;
   if (wantsJoy && joy.id === null) {
     if (touchHintHide) touchHintHide();
@@ -2209,7 +2272,6 @@ function toast(msg, ms = 4200) {
 
 // A returning walker is greeted as one — and may tear up the old chart.
 if (save.charted.length > 0) {
-  document.getElementById('start-btn').textContent = 'Return ashore';
   const note = document.createElement('p');
   note.className = 'save-note';
   note.textContent = `${save.charted.length} of ${SITES.length} sites already charted · `;
@@ -2376,17 +2438,21 @@ function openCard(marker) {
   }
   cardBody.innerHTML = s.body.map((p) => `<p>${p}</p>`).join('');
   cardArtifact.style.display = '';
-  const firstVisit = !marker.visited;
-  cardArtifact.innerHTML = firstVisit
-    ? `<b>Artifact found:</b> ${s.artifact}`
-    : `<b>Collected:</b> ${s.artifact}`;
-  cardArtifact.classList.toggle('stamped', firstVisit);
+  // The story can be read from anywhere — the chart, or across the street —
+  // but a site is charted only on foot, standing at its marker.
+  const charting = !marker.visited && state.nearSite === marker;
+  cardArtifact.innerHTML = marker.visited
+    ? `<b>Collected:</b> ${s.artifact}`
+    : charting
+      ? `<b>Artifact found:</b> ${s.artifact}`
+      : `<b>Uncharted</b> — walk to this marker to collect its artifact.`;
+  cardArtifact.classList.toggle('stamped', charting);
   cardEl.classList.remove('hidden');
-  if (firstVisit) chartSite(marker);
+  if (charting) chartSite(marker);
 }
 
-document.getElementById('card-close').addEventListener('click', () => {
-  if (ghostClick()) return;
+function closeCard() {
+  if (cardEl.classList.contains('hidden')) return;
   cardEl.classList.add('hidden');
   state.modal = false;
   if (pendingPinFx) {
@@ -2400,6 +2466,9 @@ document.getElementById('card-close').addEventListener('click', () => {
     // onto the chart before the camera lifts away
     finaleQueued = true;
   }
+}
+document.getElementById('card-close').addEventListener('click', () => {
+  if (!ghostClick()) closeCard();
 });
 
 function showEpilogue() {
@@ -2473,11 +2542,14 @@ function updateFinale(dt) {
     showEpilogue();
   }
 }
-document.getElementById('epilogue-close').addEventListener('click', () => {
-  if (ghostClick()) return;
+function closeEpilogue() {
+  if (epilogueEl.classList.contains('hidden')) return;
   epilogueEl.classList.add('hidden');
   state.modal = false;
   toast('The island is yours now. Revisit any marker to reread its story.');
+}
+document.getElementById('epilogue-close').addEventListener('click', () => {
+  if (!ghostClick()) closeEpilogue();
 });
 
 /* ---------------- movement & loop ---------------- */
@@ -2574,10 +2646,10 @@ function animate() {
       if (!isWalkable(nx, nz)) nz = player.position.z;
       [nx, nz] = collide(nx, nz);
       if (isWalkable(nx, nz)) player.position.set(nx, 0, nz);
-      player.rotation.y = angleLerp(player.rotation.y, Math.atan2(dirX, dirZ), 0.2);
+      player.rotation.y = angleLerp(player.rotation.y, Math.atan2(dirX, dirZ), 1 - Math.pow(0.00001, dt));
     }
   }
-  walkPhase += dt * (4 + moving * 9);
+  walkPhase += dt * (4 + moving * 7);
   const swing = moving > 0.01 ? 0.62 : 0;
   legL.rotation.x = Math.sin(walkPhase) * swing;
   legR.rotation.x = -Math.sin(walkPhase) * swing;
@@ -2758,11 +2830,10 @@ function animate() {
   for (const w of wanderers) {
     const nz = w.z + w.dir * w.speed * dt;
     const [cx2, cz2] = collide(w.x, nz);
-    if (Math.abs(cz2 - nz) > 1e-4) {
-      w.dir *= -1; // blocked by a stoop, wagon, or wall — turn back
+    if (Math.abs(cz2 - nz) > 1e-4 || Math.abs(cx2 - w.x) > 1e-4) {
+      w.dir *= -1; // blocked by a stoop, wagon, or wall — turn back, keep the lane
     } else {
-      w.z = cz2;
-      w.x = cx2;
+      w.z = nz;
     }
     if (w.z < w.z0) { w.z = w.z0; w.dir = 1; }
     if (w.z > w.z1) { w.z = w.z1; w.dir = -1; }
@@ -2783,7 +2854,7 @@ function animate() {
 
   // --- moving props ---
   for (const b of bobbers) {
-    b.obj.position.y = Math.sin(t * 0.9 + b.phase) * 0.18;
+    b.obj.position.y = -0.45 + Math.sin(t * 0.9 + b.phase) * 0.18; // hulls sit at the waterline
     b.obj.rotation.z = Math.sin(t * 0.7 + b.phase) * 0.02;
   }
   for (const d of drifters) {
@@ -2793,8 +2864,9 @@ function animate() {
   }
 
   train.position.z += trainDir * dt * 9;
-  if (train.position.z < -103) { train.position.z = -103; trainDir = 1; train.rotation.y = Math.PI; trainWhistle(); }
-  if (train.position.z > -8) { train.position.z = -8; trainDir = -1; train.rotation.y = 0; trainWhistle(); }
+  // the locomotive sits at local +z, so it faces -z (north) when turned about
+  if (train.position.z < -103) { train.position.z = -103; trainDir = 1; train.rotation.y = 0; trainWhistle(); }
+  if (train.position.z > -8) { train.position.z = -8; trainDir = -1; train.rotation.y = Math.PI; trainWhistle(); }
 
   // --- coal smoke from the locomotive and the two moving steamers ---
   for (const s of smokeSources) {
@@ -2868,6 +2940,24 @@ for (const id of save.charted) {
 if (save.epilogueShown) {
   state.epilogueShown = true;
   applyDusk(1); // the tide turned in an earlier session; the dusk holds
+}
+
+// The web font usually lands after the labels were first inked; ink them again.
+if (document.fonts) {
+  Promise.all([
+    document.fonts.load("italic 600 72px 'EB Garamond'"),
+    document.fonts.load("500 84px 'EB Garamond'"),
+    document.fonts.load("600 64px 'EB Garamond'"),
+  ]).catch(() => {}).then(() => document.fonts.ready).then(() => {
+    for (const r of labelRedraws) { r.draw(); r.tex.needsUpdate = true; }
+  });
+}
+
+// The island is built; the gangway can open.
+{
+  const startBtn = document.getElementById('start-btn');
+  startBtn.textContent = save.charted.length > 0 ? 'Return ashore' : 'Go ashore';
+  startBtn.disabled = false;
 }
 
 animate();

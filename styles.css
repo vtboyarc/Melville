@@ -144,6 +144,33 @@ button:disabled:hover, button:disabled:active { transform: none; box-shadow: 0 3
   text-shadow: 0 1px 0 rgba(239, 230, 208, 0.9);
 }
 
+/* landmark names over the chart view, pinned in place each frame */
+#chart-labels { position: absolute; inset: 0; overflow: hidden; animation: fadein-plain 0.8s ease both; }
+#hud:not(.chart) #chart-labels { display: none; }
+@keyframes fadein-plain { from { opacity: 0; } to { opacity: 1; } }
+.chart-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin: 0;
+  padding: 1px 4px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: none;
+  white-space: nowrap;
+  color: var(--ink);
+  background: none;
+  border: none;
+  border-radius: 2px;
+  box-shadow: none;
+  text-shadow: 0 0 2px var(--parchment), 0 0 2px var(--parchment), 0 0 4px var(--parchment);
+  pointer-events: auto;
+  transition: none;
+}
+.chart-label:hover { color: var(--red); }
+.chart-label:focus-visible { outline: 1.5px solid var(--red); outline-offset: 1px; }
+
 #chart-key {
   position: absolute;
   top: 14px;
@@ -508,6 +535,7 @@ button:disabled:hover, button:disabled:active { transform: none; box-shadow: 0 3
   #chart-key { width: 188px; font-size: 12.5px; top: 60px; }
   #chart-key summary { font-size: 13px; }
   #hud-top { top: 8px; }
+  #toast { top: 112px; } /* below the folded chart key and the compass */
   .card-inner { padding: 30px 20px 24px; }
   #compass { bottom: auto; top: 60px; left: 14px; right: auto; width: 46px; height: 46px; }
   #compass-arrow::before { top: 7px; border-left-width: 5px; border-right-width: 5px; border-bottom-width: 14px; }

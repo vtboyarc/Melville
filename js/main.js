@@ -1309,7 +1309,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   addCollider(2, 52, 10, 6);
   landmarkInfo('City Hall', 1812,
     `The marble French-Renaissance City Hall opened in 1812, seven years
-     before Melville was born around the corner on Pearl Street. In 1865
+     before Melville was born downtown by the Battery, on Pearl Street. In 1865
      Lincoln lay in state under its rotunda while the city he had carried
      filed past.`,
     2, 52, 18, { w: 10, h: 16, d: 6 });
@@ -2455,7 +2455,8 @@ document.getElementById('start-btn').addEventListener('click', () => {
   state.started = true;
   audio.init(); // the user gesture browsers require before sound
   audio.setMuted(save.muted);
-  if (window.innerWidth < 700) document.getElementById('chart-key').removeAttribute('open');
+  // phones, upright or sideways, start with the key folded so it doesn't cover the street
+  if (window.innerWidth < 700 || window.innerHeight < 500) document.getElementById('chart-key').removeAttribute('open');
   toast(save.charted.length > 0
     ? 'Back ashore. The chart remembers what you have already found.'
     : 'You step ashore at the Battery. Six red markers wait on the island — the compass points to the nearest.');

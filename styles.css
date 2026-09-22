@@ -36,10 +36,17 @@ html, body {
   backdrop-filter: blur(2px);
 }
 
-#intro { background: var(--parchment); }
+/* on a short screen (a phone held sideways) the title runs taller than the
+   window: let it scroll, and center it with auto margins, which, unlike
+   align-items, never pushes the top out of reach */
+#intro { background: var(--parchment); overflow-y: auto; }
 
+/* wide enough for the whole title on one line; on a phone it breaks in two
+   rather than running off the screen */
 .intro-inner {
-  max-width: 620px;
+  margin: auto;
+  width: 100%;
+  max-width: 800px;
   text-align: center;
   padding: 30px 26px;
   animation: fadein 0.9s ease;
@@ -541,4 +548,16 @@ button:disabled:hover, button:disabled:active { transform: none; box-shadow: 0 3
   #compass-arrow::before { top: 7px; border-left-width: 5px; border-right-width: 5px; border-bottom-width: 14px; }
   #view-btn { bottom: 14px; right: 14px; left: auto; font-size: 13px; padding: 7px 12px; }
   #mute-btn { bottom: 58px; right: 14px; left: auto; }
+}
+
+/* a phone held sideways: little height, so tighten the title and the HUD */
+@media (max-height: 500px) {
+  .intro-inner { padding: 14px 22px; }
+  .rule-top { margin-bottom: 14px; }
+  .rule-bottom { margin-top: 14px; }
+  #intro blockquote, .intro-text, .controls-hint { margin-top: 12px; }
+  #start-btn { margin-top: 16px; }
+  #chart-key { width: 188px; font-size: 12.5px; }
+  #chart-key summary { font-size: 13px; }
+  .chart-label { font-size: 11px; letter-spacing: 0.05em; } /* the chart's island is small here */
 }

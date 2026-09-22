@@ -1486,9 +1486,8 @@ landmarkInfo('Brooklyn Bridge', 1883,
   40, 51, 27, { w: 44, h: 24, d: 10 });
 landmarkInfo('Castle Garden', null,
   `Built as a fort before the War of 1812, then the concert hall where all
-   New York heard Jenny Lind in 1850 — Melville's brother got him a ticket
-   line — and from 1855 to 1890 the landing depot where eight million
-   immigrants first touched America.`,
+   New York heard Jenny Lind in 1850, and from 1855 to 1890 the landing
+   depot where eight million immigrants first touched America.`,
   -8, 91, 9.5, { w: 9, h: 7, d: 9 });
 landmarkInfo('Madison Square Garden', 1890,
   `Stanford White's colossal amphitheater of yellow brick and terra cotta
@@ -1498,7 +1497,7 @@ landmarkInfo('Madison Square Garden', 1890,
   2, -84, 41, { w: 14, h: 37, d: 12 });
 landmarkInfo('The World Building', 1890,
   `Joseph Pulitzer's gold-domed tower on Park Row — at 309 feet the
-   tallest building on earth when it opened in 1890, the year before
+   tallest building in New York when it opened in 1890, the year before
    Melville died. From its dome you could see forty miles of the harbor
    he had sailed out of as a boy.`,
   8, 34, 35.5, { w: 6, h: 33, d: 6 });

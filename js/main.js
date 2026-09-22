@@ -82,7 +82,14 @@ const DOWNTOWN_PATHS = [
 /* ---------------- basic setup ---------------- */
 
 const canvas = document.getElementById('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = (() => {
+  try {
+    return new THREE.WebGLRenderer({ canvas, antialias: true });
+  } catch (err) {
+    window.loadFailed?.('This browser could not start WebGL, which the island needs. Try turning on hardware acceleration, or another browser.');
+    throw err;
+  }
+})();
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
@@ -1116,9 +1123,12 @@ for (const [cx, cz] of [[-26, -56], [16, -16]]) {
    Everything here stood within his lifetime (by September 1891). */
 
 const landmarkLabels = [];
+const chartLabelsEl = document.getElementById('chart-labels');
 // `range` is how far away the name fades in on foot — harbor landmarks
 // are visible from the Battery, so theirs reach across the water.
-// Drawn at high resolution so chart view stays crisp.
+// On foot the name is a sprite in the scene. From the chart's altitude a
+// sprite would be shrunk so far that its mipmaps blur the ink into the
+// halo, so there each name is set as HTML type pinned over its landmark.
 function landmarkLabel(text, x, y, z, range = 34, chart = {}) {
   const cv = document.createElement('canvas');
   const font = `500 84px 'EB Garamond', Georgia, serif`;
@@ -1154,26 +1164,32 @@ function landmarkLabel(text, x, y, z, range = 34, chart = {}) {
   const sh = 2.03, sw = sh * (w / 160);
   sprite.scale.set(sw, sh, 1);
   scene.add(sprite);
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = 'chart-label';
+  el.textContent = text;
+  chartLabelsEl.appendChild(el);
   // chart.dx / chart.dz nudge the label in chart view so the downtown
-  // cluster does not pile up; on foot every label sits over its landmark
-  landmarkLabels.push({ sprite, x, z, w: sw, h: sh, range, cdx: chart.dx || 0, cdz: chart.dz || 0 });
-  return sprite;
+  // cluster does not pile up; on foot every label sits over its landmark.
+  // elW is the HTML label's width, measured the first time the chart shows.
+  landmarkLabels.push({ sprite, el, elW: 0, x, y, z, range, cdx: chart.dx || 0, cdz: chart.dz || 0 });
+  return { sprite, el };
 }
 
 // Every landmark is tappable — in the street or from the chart — and
-// opens a short history card. The label sprite and an invisible volume
-// around the structure both catch the tap.
+// opens a short history card. The label (sprite or chart type) and an
+// invisible volume around the structure all catch the tap.
 const tapTargets = [];
 function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 0, d = 8, chart = {} } = {}) {
-  const sprite = landmarkLabel(year ? `${name} · ${year}` : name, x, labelY, z, range, chart);
+  const { sprite, el } = landmarkLabel(year ? `${name} · ${year}` : name, x, labelY, z, range, chart);
   const info = { name, year, blurb };
   sprite.userData.landmark = info;
   tapTargets.push(sprite);
+  el.addEventListener('click', () => { if (!state.modal) openLandmarkCard(info); });
+  releasePointerFocus(el);
   const hitH = h || labelY;
-  const hit = new THREE.Mesh(
-    new THREE.BoxGeometry(w, hitH, d),
-    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
-  );
+  const hit = new THREE.Mesh(new THREE.BoxGeometry(w, hitH, d), new THREE.MeshBasicMaterial());
+  hit.visible = false; // never drawn; the raycaster still finds hidden meshes
   hit.position.set(x, hitH / 2, z);
   hit.userData.landmark = info;
   scene.add(hit);
@@ -1470,9 +1486,8 @@ landmarkInfo('Brooklyn Bridge', 1883,
   40, 51, 27, { w: 44, h: 24, d: 10 });
 landmarkInfo('Castle Garden', null,
   `Built as a fort before the War of 1812, then the concert hall where all
-   New York heard Jenny Lind in 1850 — Melville's brother got him a ticket
-   line — and from 1855 to 1890 the landing depot where eight million
-   immigrants first touched America.`,
+   New York heard Jenny Lind in 1850, and from 1855 to 1890 the landing
+   depot where eight million immigrants first touched America.`,
   -8, 91, 9.5, { w: 9, h: 7, d: 9 });
 landmarkInfo('Madison Square Garden', 1890,
   `Stanford White's colossal amphitheater of yellow brick and terra cotta
@@ -1482,7 +1497,7 @@ landmarkInfo('Madison Square Garden', 1890,
   2, -84, 41, { w: 14, h: 37, d: 12 });
 landmarkInfo('The World Building', 1890,
   `Joseph Pulitzer's gold-domed tower on Park Row — at 309 feet the
-   tallest building on earth when it opened in 1890, the year before
+   tallest building in New York when it opened in 1890, the year before
    Melville died. From its dome you could see forty miles of the harbor
    he had sailed out of as a boy.`,
   8, 34, 35.5, { w: 6, h: 33, d: 6 });
@@ -2249,7 +2264,10 @@ const keys = {};
 window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (finale) { skipFinale(); return; }
+  if (e.repeat) return; // a held key walks, but toggles and visits fire once
   if (e.code === 'Escape') { closeCard(); closeEpilogue(); return; }
+  // Enter on a focused button belongs to that button, not to the visit
+  if (e.code === 'Enter' && e.target.closest && e.target.closest('button')) return;
   if ((e.code === 'KeyE' || e.code === 'Enter') && state.started) tryVisit();
   if (e.code === 'KeyM' && state.started && !state.modal) toggleView();
 });
@@ -2338,7 +2356,9 @@ const SAVE_KEY = 'melville-charted-v1';
 const save = (() => {
   let s = {};
   try { s = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}') || {}; } catch { /* private mode */ }
-  return Object.assign({ charted: [], epilogueShown: false, muted: false }, s);
+  const out = Object.assign({ charted: [], epilogueShown: false, muted: false }, s);
+  if (!Array.isArray(out.charted)) out.charted = []; // a hand-edited or damaged save
+  return out;
 })();
 function persistSave() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch { /* private mode */ }
@@ -2368,7 +2388,14 @@ function toggleView() {
   hudEl.classList.toggle('chart', state.view === 'chart'); // the title steps back from the map
   applyShadowFrustum(state.view);
 }
+// A mouse or touch click shouldn't leave a HUD button holding focus, or the
+// next Enter (meant as "visit") would press it again. Keyboard users who
+// tab to a button keep their focus.
+function releasePointerFocus(btn) {
+  btn.addEventListener('click', (e) => { if (e.detail > 0) btn.blur(); });
+}
 viewBtn.addEventListener('click', toggleView);
+releasePointerFocus(viewBtn);
 
 const keyList = document.getElementById('key-list');
 [...SITES].sort((a, b) => a.num - b.num).forEach((s) => {
@@ -2400,7 +2427,8 @@ if (save.charted.length > 0) {
   reset.className = 'reset-link';
   reset.textContent = 'begin a new chart';
   reset.addEventListener('click', () => {
-    try { localStorage.removeItem(SAVE_KEY); } catch { /* private mode */ }
+    // a new chart, but the sound stays the way the walker left it
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ muted: save.muted })); } catch { /* private mode */ }
     location.reload();
   });
   note.appendChild(reset);
@@ -2445,6 +2473,7 @@ muteBtn.addEventListener('click', () => {
   audio.setMuted(save.muted);
   reflectMute();
 });
+releasePointerFocus(muteBtn);
 audio.setMuted(save.muted);
 reflectMute();
 
@@ -2468,7 +2497,9 @@ function handleTap(cx, cy) {
       return;
     }
   }
-  const hits = tapRay.intersectObjects(tapTargets, false);
+  // a label faded out on foot (or set aside for the chart's type) is not
+  // there to be tapped; the hidden volumes around the landmarks always are
+  const hits = tapRay.intersectObjects(tapTargets, false).filter((h) => !h.object.isSprite || h.object.visible);
   if (hits.length) openLandmarkCard(hits[0].object.userData.landmark);
 }
 
@@ -2743,6 +2774,23 @@ function angleLerp(a, b, t) {
 }
 
 const _fore = new THREE.Vector2(), _beam = new THREE.Vector2();
+const _lv = new THREE.Vector3();
+
+// Pin a chart label's HTML type over its landmark. On a narrow portrait
+// screen the harbor landmarks sit near the edges, so a label is slid
+// sideways until the whole name fits on screen — and on phones, where the
+// compass, chart key and buttons crowd the top and bottom, it is kept out
+// of those bands too (the breakpoint matches the stylesheet's).
+function placeChartLabel(L) {
+  if (!L.elW) L.elW = L.el.offsetWidth; // measured once, when first shown
+  _lv.set(L.x + L.cdx, L.y, L.z + L.cdz).project(camera);
+  const vw = window.innerWidth, vh = window.innerHeight, half = L.elW / 2 + 6;
+  let sx = (_lv.x * 0.5 + 0.5) * vw;
+  if (vw > half * 2) sx = Math.max(half, Math.min(vw - half, sx));
+  let sy = (-_lv.y * 0.5 + 0.5) * vh;
+  if (vw <= 700) sy = Math.max(118, Math.min(vh - 110, sy));
+  L.el.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px) translate(-50%, -50%)`;
+}
 
 function animate() {
   requestAnimationFrame(animate);
@@ -2941,24 +2989,19 @@ function animate() {
   }
 
   // --- landmark labels: always legible from the chart, discreet on foot ---
+  // (from the chart the names are HTML type; see placeChartLabel)
+  camera.updateMatrixWorld(); // this frame's view, for pinning the chart labels
   for (const L of landmarkLabels) {
-    let o, s;
     if (chartView) {
-      o = 0.95;
-      s = 2.0;
-      L.sprite.position.x = L.x + L.cdx;
-      L.sprite.position.z = L.z + L.cdz;
-    } else {
-      const d = Math.hypot(player.position.x - L.x, player.position.z - L.z);
-      const fadeIn = L.range - 16;
-      o = d < fadeIn ? 1 : d > L.range ? 0 : 1 - (d - fadeIn) / 16;
-      s = 1;
-      L.sprite.position.x = L.x;
-      L.sprite.position.z = L.z;
+      L.sprite.visible = false;
+      placeChartLabel(L);
+      continue;
     }
+    const d = Math.hypot(player.position.x - L.x, player.position.z - L.z);
+    const fadeIn = L.range - 16;
+    const o = d < fadeIn ? 1 : d > L.range ? 0 : 1 - (d - fadeIn) / 16;
     L.sprite.material.opacity = o;
     L.sprite.visible = o > 0.02;
-    if (L.sprite.visible) L.sprite.scale.set(L.w * s, L.h * s, 1);
   }
 
   // --- street life (pedestrians respect walls like everyone else) ---
@@ -3093,6 +3136,7 @@ if (document.fonts) {
     document.fonts.load("600 64px 'EB Garamond'"),
   ]).catch(() => {}).then(() => document.fonts.ready).then(() => {
     for (const r of labelRedraws) { r.draw(); r.tex.needsUpdate = true; }
+    for (const L of landmarkLabels) L.elW = 0; // the chart's type has changed width
   });
 }
 

@@ -54,6 +54,8 @@
 
   <!-- HUD -->
   <div id="hud" class="hidden">
+    <!-- landmark names over the bird's-eye chart (filled in by main.js) -->
+    <div id="chart-labels"></div>
     <div id="hud-top">
       <div id="hud-title">MELVILLE&rsquo;S&nbsp;MANHATTAN</div>
       <div id="progress">0 of 6 sites charted</div>
@@ -111,13 +113,28 @@
   <div id="joystick" class="hidden"><div id="stick"></div></div>
 
   <script>
-    // If the island has not been built after a while, say why it might not be.
+    // If the island cannot be built, say why rather than charting forever.
+    // Only the first reason is shown, and only while the island is loading.
+    function loadFailed(msg) {
+      const btn = document.getElementById('start-btn');
+      const note = document.getElementById('load-note');
+      if (!btn.disabled || note.dataset.failed) return;
+      note.dataset.failed = 'true';
+      note.textContent = msg;
+      note.classList.remove('hidden');
+      btn.textContent = 'The island could not be charted';
+    }
+    window.addEventListener('error', (e) => {
+      loadFailed(`Something went wrong while building the island (${e.message}). Try reloading the page.`);
+    });
+    // If it is merely slow, say why it might be.
     setTimeout(() => {
-      if (document.getElementById('start-btn').disabled) {
-        document.getElementById('load-note').classList.remove('hidden');
-      }
+      const note = document.getElementById('load-note');
+      if (document.getElementById('start-btn').disabled && !note.dataset.failed) note.classList.remove('hidden');
     }, 12000);
   </script>
-  <script type="module" src="./js/main.js"></script>
+  <!-- the error event also fires when an import (Three.js on the CDN) fails to load -->
+  <script type="module" src="./js/main.js"
+    onerror="loadFailed('Three.js could not be loaded from cdn.jsdelivr.net. Check your connection or content blocker, then reload.')"></script>
 </body>
 </html>

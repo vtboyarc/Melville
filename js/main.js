@@ -52,7 +52,7 @@ CLEAR_CIRCLES.push({ x: 18, z: -88.5, r: 4.5 }); // the house itself
 CLEAR_CIRCLES.push({ x: -8, z: 91, r: 6 });      // Castle Garden
 CLEAR_CIRCLES.push({ x: 19, z: 46, r: 7 });      // bridge approach
 CLEAR_CIRCLES.push({ x: 2, z: 48, r: 10 });      // City Hall and its park
-CLEAR_CIRCLES.push({ x: -2, z: 38.8, r: 6.5 });  // Federal Hall
+CLEAR_CIRCLES.push({ x: -2, z: 37.4, r: 6.5 });  // Federal Hall
 CLEAR_CIRCLES.push({ x: 12.5, z: 44, r: 5 });    // Tribune Building
 CLEAR_CIRCLES.push({ x: -1.5, z: 57, r: 5 });    // Western Union Building
 CLEAR_CIRCLES.push({ x: 19, z: -4, r: 6 });      // Cooper Union
@@ -1166,8 +1166,10 @@ function addBuilding(x, z, w, d, floors, pi, { stoop = false, tank = 'auto', gro
   // high stoop on the street side
   if (stoop && Math.random() < 0.55) {
     const st = new THREE.BoxGeometry(1.1, 0.6, 0.9);
-    st.translate(x + (Math.random() - 0.5) * (w - 1.4), 0.3, z + (d / 2 + 0.42) * (stoop === 'north' ? -1 : 1));
+    const sx = x + (Math.random() - 0.5) * (w - 1.4), sz = z + (d / 2 + 0.42) * (stoop === 'north' ? -1 : 1);
+    st.translate(sx, 0.3, sz);
     trimGeos.push(st);
+    addCollider(sx, sz, 1.1, 0.9, 0.05); // it reaches out past the housefront's own collider
   }
   // wooden water tank on the taller blocks
   if ((tank === 'auto' && floors >= 5 && Math.random() < 0.3) || tank === true) {
@@ -1470,9 +1472,11 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 
 // City Hall (1812) in its park.
 {
-  parkGreen(new THREE.CircleGeometry(4.5, 18), 2, 44);
-  tree(-1, 43, 0.8);
-  tree(5, 45, 0.9);
+  // its lawn lies between the hall's front and Wall Street, short of
+  // Federal Hall's steps on the far side of the street
+  parkGreen(new THREE.CircleGeometry(2.2, 20).scale(2.3, 1, 1), 3, 46.6);
+  tree(0.4, 46.4, 0.8);
+  tree(6, 46.9, 0.9);
   landmarkBox(10, 3, 6, 6, 2, 52); // marble, three tall storeys
   box(10.6, 0.6, 6.6, 0xc7bda5, 2, 9.3, 52);
   box(3.6, 3, 3.6, 0xded6c2, 2, 10.8, 52); // attic pavilion
@@ -1492,7 +1496,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 
 // Federal Hall (1842), Washington's statue (1883) on its steps.
 {
-  const fx = -2, fz = 38.8;
+  const fx = -2, fz = 37.2; // the foot of its steps meets Wall Street's kerb
   box(8, 1.8, 6.4, 0xcfc8b4, fx, 0.9, fz);                 // plinth
   box(8.4, 1.2, 2.2, 0xc2bba6, fx, 0.6, fz + 3.9);         // steps
   const cella = box(7.6, 5.6, 4.4, 0xcfc8b4, fx, 4.6, fz - 0.8);
@@ -1520,6 +1524,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   pedi.castShadow = true;
   scene.add(pedi);
   addCollider(fx, fz, 8, 6.4);
+  addCollider(fx, fz + 3.9, 8.4, 2.2, 0.3); // the steps, and Washington on them
   occluders.push(cella);
   landmarkInfo('Federal Hall', 1842,
     `On this Wall Street corner Washington took the first presidential oath
@@ -1737,6 +1742,7 @@ roofGeos.forEach((geos, i) => {
     const lamp = new THREE.BoxGeometry(0.26, 0.34, 0.26);
     lamp.translate(lx, 2.85, lz);
     lampGeos.push(lamp);
+    addCollider(lx, lz, 0.2, 0.2, 0.14);
   }
   if (poleGeos.length) {
     scene.add(new THREE.Mesh(mergeGeometries(poleGeos, false), lambert(0x33302c)));
@@ -1781,7 +1787,10 @@ function makeFigure(lady) {
   const usable = aveSegs.filter((a) => a.z1 - a.z0 > 30);
   for (let i = 0; i < 9 && usable.length; i++) {
     const a = usable[Math.floor(Math.random() * usable.length)];
-    const lane = Math.random() < 0.5 ? -1.9 : 1.9;
+    // along the kerb: the housefronts' colliders reach out over the
+    // sidewalk itself, and a figure set walking there is stopped at the
+    // first wall and never gets anywhere
+    const lane = Math.random() < 0.5 ? -1.15 : 1.15;
     wanderers.push({
       g: makeFigure(Math.random() < 0.4),
       x: a.x + lane,
@@ -1902,6 +1911,7 @@ function tree(x, z, s = 1) {
   box(4.9, 0.6, 5.5, 0x6e4a3a, hx, 9.25, hz); // cornice
   box(1.2, 2.6, 0.3, 0x274029, hx - 1.1, 1.5, hz + 2.55); // green door
   box(2.4, 0.6, 0.7, 0xb5a98c, hx - 1.1, 0.3, hz + 3.05); // high stoop
+  addCollider(hx - 1.1, hz + 3.05, 2.4, 0.7, 0.05);
 }
 
 // Madison Square Garden (1890) with its tower and the gilded Diana.
@@ -2023,6 +2033,7 @@ function barrels(cx, cz) {
     b.position.set(cx + Math.random() * 1.6 - 0.8, 0.57, cz + Math.random() * 1.6 - 0.8);
     b.castShadow = true;
     scene.add(b);
+    addCollider(b.position.x, b.position.z, 1, 1, 0.15);
   }
 }
 
@@ -2032,6 +2043,7 @@ pier(-49, -12);
   const office = box(3.6, 2.8, 3, 0xa8a092, -53.5, 1.5, -12);
   office.castShadow = true;
   box(4, 0.4, 3.4, 0x6e6457, -53.5, 3.05, -12);
+  addCollider(-53.5, -12, 3.6, 3, 0.3); // leaves a walk down either side to the pier's end
   barrels(-45, -10.5);
 }
 // East River pier
@@ -2198,7 +2210,7 @@ function steamShip(x, z, rotY = 0) {
 }
 
 sailShip(-53, -26.5, 0.9, 0, { furled: true });   // moored at the customs pier
-sailShip(52.5, -86.2, 0.85, 0, { furled: true }); // moored at the East River pier
+sailShip(52.5, -85.8, 0.85, 0, { furled: true }); // moored at the East River pier
 // Ships under way. Each works one reach of water between two marks `a`
 // and `b` on one axis: she slows as she nears a mark, comes about, and
 // stands back the way she came. The reaches are chosen to keep every hull

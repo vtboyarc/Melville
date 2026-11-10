@@ -35,10 +35,27 @@ const ISLAND = [
   [18, 52], [10, 74], [4, 88],
 ];
 
-// Walkable rectangles besides the island itself (the two customs piers).
+// The harbor end of the chart. The statue stands on Bedloe's Island, off
+// the Battery; a boat crosses to it between two landing stages. Each
+// landing has its planked `pier`, the `gangway` at its end (the boat can be
+// boarded from within three paces of it), the spot where a passenger is
+// set `ashore`, and the boat's `berth`.
+const LIBERTY = { x: -44, z: 109.5 };
+const CASTLE_GARDEN = { x: -13.5, z: 82.5 }; // up the west shore, clear of the view to the statue
+const START = { x: -1, z: 91 };               // where the walker steps ashore: the head of the Battery landing
+const LANDINGS = {
+  battery: { pier: { x0: -3, x1: 1, z0: 93, z1: 103.3 }, gangway: [-1.3, 101.6], ashore: [-1.8, 101.5], berth: [-8.1, 101.5] },
+  bedloes: { pier: { x0: -35, x1: -30.25, z0: 102.2, z1: 105.8 }, gangway: [-32, 104], ashore: [-31.5, 104], berth: [-25.15, 104] },
+};
+
+// Walkable rectangles besides the island itself: the two customs piers,
+// the two landings, and Bedloe's Island. `planks` are wood underfoot.
 const WALK_RECTS = [
-  { x0: -58, x1: -39, z0: -15.5, z1: -8.5 },  // Gansevoort pier
-  { x0: 39, x1: 58, z0: -98.5, z1: -91.5 },   // East River pier
+  { x0: -58, x1: -39, z0: -15.5, z1: -8.5, planks: true },  // Gansevoort pier
+  { x0: 39, x1: 58, z0: -98.5, z1: -91.5, planks: true },   // East River pier
+  { ...LANDINGS.battery.pier, planks: true },
+  { ...LANDINGS.bedloes.pier, planks: true },
+  { x0: LIBERTY.x - 9.1, x1: LIBERTY.x + 9.1, z0: LIBERTY.z - 8.6, z1: LIBERTY.z + 8.6 }, // Bedloe's Island, inside its seawall
 ];
 
 const AVENUES = [-36, -24, -12, 0, 12, 24, 36];
@@ -49,10 +66,10 @@ const EL_X = 30; // Third Avenue El runs along x = 30, z in [-109, 0]
 
 const CLEAR_CIRCLES = SITES.map((s) => ({ x: s.pos.x, z: s.pos.z, r: 6 }));
 CLEAR_CIRCLES.push({ x: 18, z: -88.5, r: 4.5 }); // the house itself
-CLEAR_CIRCLES.push({ x: -8, z: 91, r: 6 });      // Castle Garden
+CLEAR_CIRCLES.push({ x: CASTLE_GARDEN.x, z: CASTLE_GARDEN.z, r: 6 });
 CLEAR_CIRCLES.push({ x: 19, z: 46, r: 7 });      // bridge approach
 CLEAR_CIRCLES.push({ x: 2, z: 48, r: 10 });      // City Hall and its park
-CLEAR_CIRCLES.push({ x: -2, z: 38.8, r: 6.5 });  // Federal Hall
+CLEAR_CIRCLES.push({ x: -2, z: 37.4, r: 6.5 });  // Federal Hall
 CLEAR_CIRCLES.push({ x: 12.5, z: 44, r: 5 });    // Tribune Building
 CLEAR_CIRCLES.push({ x: -1.5, z: 57, r: 5 });    // Western Union Building
 CLEAR_CIRCLES.push({ x: 19, z: -4, r: 6 });      // Cooper Union
@@ -72,6 +89,15 @@ const STREET_CUTS = [
   { x0: 16, x1: 22, z0: -8, z1: 0 },             // Cooper Union
   { x0: -10, x1: 6, z0: -42.8, z1: -37.2 },      // Union Square
 ];
+
+// The other shores, as slabs of plainer paper: { x0, x1, z0, z1 }. The
+// water reads these too, to know where its shallows are.
+const OUTER_LAND = {
+  jersey: { x0: -162, x1: -66, z0: -132, z1: 48 },
+  brooklyn: { x0: 58, x1: 154, z0: -32, z1: 128 },
+  bedloes: { x0: LIBERTY.x - 9.5, x1: LIBERTY.x + 9.5, z0: LIBERTY.z - 9, z1: LIBERTY.z + 9 },
+  governors: { x0: 26.5, x1: 39.5, z0: 102, z1: 110 },
+};
 
 const DOWNTOWN_PATHS = [
   [[2, 88], [-4, 64], [-10, 38], [-13, 12]],   // Broadway
@@ -142,13 +168,23 @@ const cam = { yaw: 0, height: 5, dist: 11, smoothDist: 11, lastDrag: -10 };
 // (z ≈ 122 to -112, x ≈ ±58) fit the 55° frustum even on a portrait phone.
 const CHART_CAM_POS = new THREE.Vector3(0, 215, 120);
 const CHART_LOOK_AT = new THREE.Vector3(0, 0, 10);
-const lookTarget = new THREE.Vector3(0, 1.7, 70); // smoothed camera focus
+const lookTarget = new THREE.Vector3(START.x, 1.7, START.z); // smoothed camera focus
+// The opening view (see `opening`, below) looks past the walker to the
+// statue. The camera sits low, so that all of her fits under the top of
+// the frame, and a little off her bearing, so that she stands to one side
+// of the title and the opening note rather than behind them (by a share
+// of the view's width, which on an upright phone is not much).
+const OPENING_HEIGHT = 2.4;
+const OPENING_YAW = Math.atan2(START.x - LIBERTY.x, START.z - LIBERTY.z)
+  - 0.45 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect);
+const OPENING_CAM = { x: START.x + Math.sin(OPENING_YAW) * cam.dist, z: START.z + Math.cos(OPENING_YAW) * cam.dist };
 const occluders = []; // meshes the camera should not clip through
 
 const hemi = new THREE.HemisphereLight(0xd5e0e8, 0xb09a78, 1.15);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffe0ac, 2.6);
-sun.position.set(70, 100, 45);
+const SUN_OFFSET = new THREE.Vector3(70, 100, 45); // from whatever the light is aimed at, up to the light
+sun.position.copy(SUN_OFFSET);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.far = 400;
@@ -158,19 +194,56 @@ sun.shadow.radius = 3;
 scene.add(sun);
 scene.add(sun.target);
 
-// Tight shadow frustum at street level for crisp shadows; wide in chart view.
+// The sun never changes its bearing, so the shadow camera's own sideways
+// and upward axes are fixed in the world. They are what its frustum is
+// measured along — which is not the island's east and north.
+const SHADOW_RIGHT = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), SUN_OFFSET).normalize();
+const SHADOW_UP = new THREE.Vector3().crossVectors(SUN_OFFSET, SHADOW_RIGHT).normalize();
+const CHART_FOCUS = new THREE.Vector3(0, 0, 4); // the middle of everything the chart shows
+const shadowFocus = new THREE.Vector3();
+const shadowTexel = { x: 1, y: 1 }; // world units per shadow-map texel, along those axes
+
+// Tight shadow frustum at street level for crisp shadows. In chart view it
+// is fitted around the whole chart — the island, both piers, the harbor's
+// islands and the tallest tower — wherever the walker happens to stand.
 function applyShadowFrustum(view) {
   const c = sun.shadow.camera;
+  let halfW = 55, halfH = 75;
   if (view === 'chart') {
-    c.left = -100; c.right = 100; c.top = 140; c.bottom = -140;
-  } else {
-    c.left = -55; c.right = 55; c.top = 75; c.bottom = -75;
+    halfW = halfH = 0;
+    const corner = new THREE.Vector3();
+    for (const x of [-66, 66]) for (const y of [0, 40]) for (const z of [-116, 124]) {
+      corner.set(x, y, z).sub(CHART_FOCUS);
+      halfW = Math.max(halfW, Math.abs(corner.dot(SHADOW_RIGHT)));
+      halfH = Math.max(halfH, Math.abs(corner.dot(SHADOW_UP)));
+    }
   }
+  c.left = -halfW; c.right = halfW; c.top = halfH; c.bottom = -halfH;
   c.updateProjectionMatrix();
+  shadowTexel.x = (2 * halfW) / sun.shadow.mapSize.x;
+  shadowTexel.y = (2 * halfH) / sun.shadow.mapSize.y;
 }
 applyShadowFrustum('street');
 
+// Aim the sun. On foot the light follows the walker, but only in whole
+// shadow-map texels: moved by fractions, every shadow edge in the street
+// would crawl as he walks. From the chart it holds still over the island.
+function aimSun(view, px, pz) {
+  if (view === 'chart') {
+    shadowFocus.copy(CHART_FOCUS);
+  } else {
+    shadowFocus.set(px, 0, pz);
+    const r = shadowFocus.dot(SHADOW_RIGHT), u = shadowFocus.dot(SHADOW_UP);
+    shadowFocus
+      .addScaledVector(SHADOW_RIGHT, Math.round(r / shadowTexel.x) * shadowTexel.x - r)
+      .addScaledVector(SHADOW_UP, Math.round(u / shadowTexel.y) * shadowTexel.y - u);
+  }
+  sun.target.position.copy(shadowFocus);
+  sun.position.copy(shadowFocus).add(SUN_OFFSET);
+}
+
 const colliders = []; // axis-aligned boxes {x0,x1,z0,z1}
+const roundColliders = []; // and round ones {x,z,r}, for round buildings
 
 /* ---------------- helpers ---------------- */
 
@@ -182,6 +255,11 @@ function pointInPoly(x, z, poly = ISLAND) {
     if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
   }
   return inside;
+}
+
+// on a pier's or a landing's planking, rather than on the ground
+function onPlanks(x, z) {
+  return !pointInPoly(x, z) && WALK_RECTS.some((r) => r.planks && x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1);
 }
 
 function isWalkable(x, z) {
@@ -328,32 +406,95 @@ function waveHeight(wx, wz, t) {
     Math.sin(x * 0.23 - t * 1.6) * Math.sin(z * 0.19 + t * 1.2) * 0.16 +
     Math.sin(x * 0.41 + z * 0.37 + t * 2.1) * 0.07;
 }
-const waterUniforms = { uTime: { value: 0 } };
+// How far each patch of water lies from the nearest land, baked once into
+// a small texture (one texel per 1.5 units, 0 at the shore and 1 from
+// SHOAL_REACH outward). The water's shader reads it to pale the shallows
+// along every shore.
+const SHOAL_REACH = 9;
+const shoreField = (() => {
+  const X0 = -176, Z0 = -150, STEP = 1.5, W = 236, H = 198;
+  // RGBA, though only red is read: a one-channel texture has no format
+  // that a WebGL 1 context (which Three.js still falls back to) can upload
+  const data = new Uint8Array(W * H * 4).fill(255);
+  const slabs = Object.values(OUTER_LAND);
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      const x = X0 + (i + 0.5) * STEP, z = Z0 + (j + 0.5) * STEP;
+      let d = SHOAL_REACH;
+      for (const r of slabs) {
+        d = Math.min(d, Math.hypot(Math.max(r.x0 - x, 0, x - r.x1), Math.max(r.z0 - z, 0, z - r.z1)));
+      }
+      // the island's outline is the costly test; skip it far from the island
+      if (d > 0 && x > -50 - SHOAL_REACH && x < 50 + SHOAL_REACH && z > -118 - SHOAL_REACH && z < 100 + SHOAL_REACH) {
+        d = pointInPoly(x, z) ? 0 : Math.min(d, shoreDistance(x, z));
+      }
+      data[(j * W + i) * 4] = Math.round(255 * Math.min(1, d / SHOAL_REACH));
+    }
+  }
+  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
+  tex.magFilter = tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return { tex, origin: new THREE.Vector2(X0, Z0), size: new THREE.Vector2(W * STEP, H * STEP) };
+})();
+
+// uSkyTint is the sky the water mirrors where it is seen at a glancing
+// angle; it warms with the dusk of the finale (see applyDusk).
+const WATER_SKY_DAY = new THREE.Color(0xb7c4c8), WATER_SKY_DUSK = new THREE.Color(0xe6b98a);
+const waterUniforms = {
+  uTime: { value: 0 },
+  uShore: { value: shoreField.tex },
+  uShoreOrigin: { value: shoreField.origin },
+  uShoreSize: { value: shoreField.size },
+  uShallow: { value: new THREE.Color(0x86aa9c) },
+  uSkyTint: { value: WATER_SKY_DAY.clone() },
+};
 const waterGeo = new THREE.PlaneGeometry(600, 640, 240, 256);
 waterGeo.rotateX(-Math.PI / 2);
 const waterMat = new THREE.MeshStandardMaterial({
-  color: 0x4a7377, // the grey-green of the harbor, not a swimming pool
-  roughness: 0.34,
+  color: 0x456f74, // the grey-green of the harbor, not a swimming pool
+  roughness: 0.3,
   metalness: 0.05,
   flatShading: true, // normals come from screen derivatives, so displacement needs no recompute
-  envMapIntensity: 0.55, // the room reflection washes the water pale if left strong
+  envMapIntensity: 0.3, // the room reflection washes the water pale if left strong; the sky tint below does that job
 });
 waterMat.onBeforeCompile = (shader) => {
-  shader.uniforms.uTime = waterUniforms.uTime;
+  Object.assign(shader.uniforms, waterUniforms);
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nuniform float uTime;\nvarying float vCrest;')
+    .replace('#include <common>', `#include <common>
+      uniform float uTime;
+      uniform vec2 uShoreOrigin;
+      uniform vec2 uShoreSize;
+      varying float vCrest;
+      varying vec2 vShoreUv;`)
     .replace('#include <begin_vertex>', `#include <begin_vertex>
       float wave = sin(transformed.x * 0.09 + uTime * 0.9) * cos(transformed.z * 0.07 + uTime * 0.7) * 0.42
                  + sin(transformed.x * 0.23 - uTime * 1.6) * sin(transformed.z * 0.19 + uTime * 1.2) * 0.16
                  + sin(transformed.x * 0.41 + transformed.z * 0.37 + uTime * 2.1) * 0.07;
       transformed.y += wave;
-      vCrest = wave / 0.65;`);
-  // crests run paler and troughs deeper, so the swell reads even where
-  // the light is flat
+      vCrest = wave / 0.65;
+      vShoreUv = ((modelMatrix * vec4(transformed, 1.0)).xz - uShoreOrigin) / uShoreSize;`);
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nvarying float vCrest;')
+    .replace('#include <common>', `#include <common>
+      uniform sampler2D uShore;
+      uniform vec3 uShallow;
+      uniform vec3 uSkyTint;
+      varying float vCrest;
+      varying vec2 vShoreUv;`)
+    // the shallows along every shore run paler and greener; crests run
+    // paler and troughs deeper, so the swell reads even where the light is
+    // flat; and the tallest crests break into a fleck of white
     .replace('#include <color_fragment>', `#include <color_fragment>
-      diffuseColor.rgb *= 0.9 + 0.16 * vCrest;`);
+      float shoal = 1.0 - texture2D(uShore, vShoreUv).r;
+      diffuseColor.rgb = mix(diffuseColor.rgb, uShallow, shoal * shoal * 0.62);
+      diffuseColor.rgb *= 0.9 + 0.16 * vCrest;
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.9, 0.84), smoothstep(0.8, 1.0, vCrest) * 0.4);`)
+    // seen at a glancing angle water is a mirror: each facet takes on the
+    // sky by how far it tilts away from the eye, so the harbor deepens at
+    // the walker's feet and silvers toward the horizon
+    .replace('#include <opaque_fragment>', `
+      float glance = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 4.0);
+      outgoingLight = mix(outgoingLight, uSkyTint, glance * 0.72);
+      #include <opaque_fragment>`);
 };
 const water = new THREE.Mesh(waterGeo, waterMat);
 water.position.set(0, WATER_Y, WATER_Z);
@@ -413,10 +554,13 @@ const foam = (() => {
 })();
 
 // Outer shores: New Jersey and Brooklyn, as plainer paper slabs.
-const nj = box(96, 2, 180, COLORS.outerLand, -114, -0.9, -42, scene, false);
-nj.receiveShadow = true;
-const bk = box(96, 2, 160, COLORS.outerLand, 106, -0.9, 48, scene, false);
-bk.receiveShadow = true;
+function landSlab(r, h, y) {
+  const m = box(r.x1 - r.x0, h, r.z1 - r.z0, COLORS.outerLand, (r.x0 + r.x1) / 2, y, (r.z0 + r.z1) / 2, scene, false);
+  m.receiveShadow = true;
+  return m;
+}
+landSlab(OUTER_LAND.jersey, 2, -0.9);
+landSlab(OUTER_LAND.brooklyn, 2, -0.9);
 // A modest skyline hint on each far shore.
 for (let i = 0; i < 14; i++) {
   const zb = -110 + i * 13 + Math.random() * 5;
@@ -431,46 +575,62 @@ waterLabel('HUDSON RIVER', -58, 8, -Math.PI / 2);
 waterLabel('EAST RIVER', 50, -42, -Math.PI / 2, 34);
 waterLabel('NEW JERSEY', -92, -40, 0, 36);
 waterLabel('BROOKLYN', 92, 50, 0, 34);
-waterLabel('THE BATTERY', -2, 108, 0, 30);
+waterLabel('THE BATTERY', 5, 113, 0, 30); // south of the boat's crossing
 
 /* ---------------- streets ---------------- */
 
-// Belgian-block (cobblestone) paving, drawn once and tiled.
+// Belgian-block paving, drawn once and tiled: small granite setts in
+// staggered courses, each a slightly different stone, worn paler along
+// the crown of the block and dark in the joints.
 function makeCobbleTexture() {
-  const [cv, ctx] = canvas2d(128, 128);
-  ctx.fillStyle = '#c5b896';
-  ctx.fillRect(0, 0, 128, 128);
-  const rowH = 16;
-  for (let row = 0; row < 8; row++) {
-    const off = (row % 2) * 16;
-    for (let col = -1; col < 5; col++) {
-      const x = col * 32 + off, y = row * rowH;
-      const shade = 0.92 + Math.random() * 0.13;
-      ctx.fillStyle = `rgb(${Math.round(190 * shade)},${Math.round(177 * shade)},${Math.round(143 * shade)})`;
-      ctx.fillRect(x + 1.5, y + 1.5, 29, 13);
+  const S = 256, COLS = 8, ROWS = 16;
+  const [cv, ctx] = canvas2d(S, S);
+  ctx.fillStyle = '#8f8570'; // the joints
+  ctx.fillRect(0, 0, S, S);
+  const bw = S / COLS, bh = S / ROWS;
+  for (let row = 0; row < ROWS; row++) {
+    const off = (row % 2) * (bw / 2);
+    for (let col = -1; col < COLS; col++) {
+      const x = col * bw + off, y = row * bh;
+      const shade = 0.9 + Math.random() * 0.16;
+      const warm = Math.random() * 10 - 4; // some setts run tan, some grey
+      const r = Math.round((186 + warm) * shade), g = Math.round(176 * shade), b = Math.round((150 - warm) * shade);
+      // a sett that wraps past the right edge is drawn again on the left,
+      // so the tile repeats without a seam
+      for (const dx of x + bw > S ? [0, -S] : [0]) {
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(x + dx + 1, y + 1, bw - 2, bh - 2);
+        ctx.fillStyle = 'rgba(255,250,235,0.16)'; // worn crown
+        ctx.fillRect(x + dx + 3, y + 2, bw - 7, bh - 6);
+        ctx.fillStyle = 'rgba(40,32,20,0.14)';   // the low side holds the dirt
+        ctx.fillRect(x + dx + 1, y + bh - 3, bw - 2, 2);
+      }
     }
   }
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 4;
+  tex.anisotropy = 8;
   return tex;
 }
 const cobbleTex = makeCobbleTexture();
-const streetMat = new THREE.MeshLambertMaterial({ map: cobbleTex, color: 0xfFf6e2 });
+const streetMat = new THREE.MeshLambertMaterial({ map: cobbleTex, color: 0xfff6e2 });
 
 function scaleUV(geo, ru, rv) {
   const uv = geo.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * ru, uv.getY(i) * rv);
 }
 
-function streetPlane(len, wide, alongX = true) {
+// One strip of paving, laid flat and moved into place. Every strip goes
+// into a single merged mesh, so the whole street grid is one draw call.
+const streetGeos = [];
+function streetPlane(len, wide, cx, y, cz, { alongX = true, rotY = 0 } = {}) {
   const geo = alongX ? new THREE.PlaneGeometry(len, wide) : new THREE.PlaneGeometry(wide, len);
   scaleUV(geo, (alongX ? len : wide) / 3.2, (alongX ? wide : len) / 3.2);
   geo.rotateX(-Math.PI / 2);
-  const m = new THREE.Mesh(geo, streetMat);
-  m.receiveShadow = true;
-  return m;
+  if (rotY) geo.rotateY(rotY);
+  geo.translate(cx, y, cz);
+  streetGeos.push(geo);
 }
 
 // Split the span [a, b] of a road whose centre line sits at `line` on the
@@ -481,29 +641,33 @@ function cutSpan(a, b, line, alongX) {
   for (const c of STREET_CUTS) {
     const [l0, l1, s0, s1] = alongX ? [c.z0, c.z1, c.x0, c.x1] : [c.x0, c.x1, c.z0, c.z1];
     if (line < l0 || line > l1) continue;
-    const next = [];
-    for (const [p, q] of spans) {
-      if (s1 <= p || s0 >= q) { next.push([p, q]); continue; }
-      if (s0 > p) next.push([p, s0]);
-      if (s1 < q) next.push([s1, q]);
-    }
-    spans = next;
+    spans = subtractSpan(spans, s0, s1);
   }
   return spans.filter(([p, q]) => q - p >= 3);
 }
 
+// Take the interval [s0, s1] out of a list of [p, q] spans.
+function subtractSpan(spans, s0, s1) {
+  const next = [];
+  for (const [p, q] of spans) {
+    if (s1 <= p || s0 >= q) { next.push([p, q]); continue; }
+    if (s0 > p) next.push([p, s0]);
+    if (s1 < q) next.push([s1, q]);
+  }
+  return next;
+}
+
+const STREET_HALF = 1.1, AVENUE_HALF = 1.4; // half-widths of the roadways
+const WALK_W = 0.95;                         // a sidewalk's width
+const STREET_WALK = 1.62, AVENUE_WALK = 1.92; // sidewalk centre lines, from the road's
 const streetSegs = []; // east-west: { z, x0, x1 }
 const aveSegs = [];    // north-south: { x, z0, z1 }
 function addStreet(z, x0, x1) {
-  const m = streetPlane(x1 - x0, 2.2);
-  m.position.set((x0 + x1) / 2, 0.06, z);
-  scene.add(m);
+  streetPlane(x1 - x0, STREET_HALF * 2, (x0 + x1) / 2, 0.06, z);
   streetSegs.push({ z, x0, x1 });
 }
 function addAvenue(x, z0, z1) {
-  const m = streetPlane(z1 - z0, 2.8, false);
-  m.position.set(x, 0.05, (z0 + z1) / 2);
-  scene.add(m);
+  streetPlane(z1 - z0, AVENUE_HALF * 2, x, 0.05, (z0 + z1) / 2, { alongX: false });
   aveSegs.push({ x, z0, z1 });
 }
 for (const z of STREETS) {
@@ -527,7 +691,10 @@ for (const x of AVENUES) {
 // Third Avenue itself, under the El: the pillars stand in the roadway.
 addAvenue(EL_X, -108, -1);
 
-// Bluestone sidewalks flanking every paved street and avenue.
+// Bluestone sidewalks flanking every paved street and avenue. They stop at
+// each crossing: a street's sidewalk runs up to the avenue's kerb and turns
+// the corner there, and the avenue's picks up again on the far side of the
+// street — so the roadway is clear through every intersection.
 {
   const [cv, ctx] = canvas2d(64, 64);
   ctx.fillStyle = '#979c94';
@@ -540,21 +707,60 @@ addAvenue(EL_X, -108, -1);
   const walkTex = new THREE.CanvasTexture(cv);
   walkTex.colorSpace = THREE.SRGBColorSpace;
   walkTex.wrapS = walkTex.wrapT = THREE.RepeatWrapping;
+  walkTex.anisotropy = 4;
   const geos = [];
-  function walkStrip(len, cx, cz, alongX) {
-    const geo = new THREE.PlaneGeometry(alongX ? len : 0.95, alongX ? 0.95 : len);
-    scaleUV(geo, (alongX ? len : 0.95) / 1.9, (alongX ? 0.95 : len) / 1.9);
+  function walkStrip(a, b, cx, cz, alongX) {
+    const len = b - a;
+    if (len < 0.3) return;
+    const geo = new THREE.PlaneGeometry(alongX ? len : WALK_W, alongX ? WALK_W : len);
+    scaleUV(geo, (alongX ? len : WALK_W) / 1.9, (alongX ? WALK_W : len) / 1.9);
     geo.rotateX(-Math.PI / 2);
-    geo.translate(cx, 0.085, cz);
+    geo.translate(alongX ? (a + b) / 2 : cx, 0.085, alongX ? cz : (a + b) / 2);
     geos.push(geo);
   }
+  const streetReach = STREET_WALK + WALK_W / 2; // a street and its sidewalks, from the centre line
   for (const s of streetSegs) {
-    walkStrip(s.x1 - s.x0, (s.x0 + s.x1) / 2, s.z - 1.62, true);
-    walkStrip(s.x1 - s.x0, (s.x0 + s.x1) / 2, s.z + 1.62, true);
+    let spans = [[s.x0, s.x1]];
+    for (const a of aveSegs) {
+      if (s.z >= a.z0 - streetReach && s.z <= a.z1 + streetReach) spans = subtractSpan(spans, a.x - AVENUE_HALF, a.x + AVENUE_HALF);
+    }
+    for (const [p, q] of spans) {
+      walkStrip(p, q, 0, s.z - STREET_WALK, true);
+      walkStrip(p, q, 0, s.z + STREET_WALK, true);
+    }
   }
   for (const a of aveSegs) {
-    walkStrip(a.z1 - a.z0, a.x - 1.92, (a.z0 + a.z1) / 2, false);
-    walkStrip(a.z1 - a.z0, a.x + 1.92, (a.z0 + a.z1) / 2, false);
+    for (const side of [-AVENUE_WALK, AVENUE_WALK]) {
+      const x = a.x + side;
+      let spans = [[a.z0, a.z1]];
+      for (const s of streetSegs) {
+        if (x >= s.x0 && x <= s.x1) spans = subtractSpan(spans, s.z - streetReach, s.z + streetReach);
+      }
+      for (const [p, q] of spans) walkStrip(p, q, x, 0, false);
+    }
+  }
+  // Third Avenue sits a few paces from its neighbours on either hand; the
+  // slivers left between their sidewalks are flagged over, so the El stands
+  // on one broad pavement instead of over strips of bare ground.
+  {
+    const el = aveSegs[aveSegs.length - 1];
+    const inner = AVENUE_WALK + WALK_W / 2;
+    for (const a of aveSegs) {
+      const gap = Math.abs(a.x - el.x) - 2 * inner;
+      if (a === el || gap <= 0 || gap > 3) continue;
+      const mx = (a.x + el.x) / 2;
+      let spans = [[Math.max(a.z0, el.z0), Math.min(a.z1, el.z1)]];
+      for (const st of streetSegs) { // the cross streets still run through
+        if (mx >= st.x0 && mx <= st.x1) spans = subtractSpan(spans, st.z - STREET_HALF, st.z + STREET_HALF);
+      }
+      for (const [z0, z1] of spans) {
+        const geo = new THREE.PlaneGeometry(gap + 0.1, z1 - z0);
+        scaleUV(geo, (gap + 0.1) / 1.9, (z1 - z0) / 1.9);
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(mx, 0.08, (z0 + z1) / 2);
+        geos.push(geo);
+      }
+    }
   }
   const mesh = new THREE.Mesh(
     mergeGeometries(geos, false),
@@ -566,12 +772,13 @@ addAvenue(EL_X, -108, -1);
 for (const path of DOWNTOWN_PATHS) {
   for (let i = 0; i < path.length - 1; i++) {
     const [ax, az] = path[i], [bx, bz] = path[i + 1];
-    const len = Math.hypot(bx - ax, bz - az);
-    const m = streetPlane(len, 2.4);
-    m.position.set((ax + bx) / 2, 0.07, (az + bz) / 2);
-    m.rotation.y = -Math.atan2(bz - az, bx - ax);
-    scene.add(m);
+    streetPlane(Math.hypot(bx - ax, bz - az), 2.4, (ax + bx) / 2, 0.07, (az + bz) / 2, { rotY: -Math.atan2(bz - az, bx - ax) });
   }
+}
+{
+  const mesh = new THREE.Mesh(mergeGeometries(streetGeos, false), streetMat);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
 }
 
 /* ---------------- buildings: 1890 New York ----------------
@@ -991,8 +1198,10 @@ function addBuilding(x, z, w, d, floors, pi, { stoop = false, tank = 'auto', gro
   // high stoop on the street side
   if (stoop && Math.random() < 0.55) {
     const st = new THREE.BoxGeometry(1.1, 0.6, 0.9);
-    st.translate(x + (Math.random() - 0.5) * (w - 1.4), 0.3, z + (d / 2 + 0.42) * (stoop === 'north' ? -1 : 1));
+    const sx = x + (Math.random() - 0.5) * (w - 1.4), sz = z + (d / 2 + 0.42) * (stoop === 'north' ? -1 : 1);
+    st.translate(sx, 0.3, sz);
     trimGeos.push(st);
+    addCollider(sx, sz, 1.1, 0.9, 0.05); // it reaches out past the housefront's own collider
   }
   // wooden water tank on the taller blocks
   if ((tank === 'auto' && floors >= 5 && Math.random() < 0.3) || tank === true) {
@@ -1198,8 +1407,8 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 
 // The Statue of Liberty (1886) — five years old, her copper still brown.
 {
-  const lx = -34, lz = 107;
-  box(15, 1.6, 14, COLORS.outerLand, lx, -0.6, lz, scene, false); // Bedloe's Island
+  const lx = LIBERTY.x, lz = LIBERTY.z;
+  landSlab(OUTER_LAND.bedloes, 1.6, -0.8); // Bedloe's Island, its top level with the Battery's: it is walked on
   // the star-shaped ramparts of Fort Wood
   const starPts = [];
   for (let i = 0; i < 22; i++) {
@@ -1213,6 +1422,8 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   star.position.set(lx, 2.2, lz);
   star.castShadow = star.receiveShadow = true;
   scene.add(star);
+  roundColliders.push({ x: lx, z: lz, r: 6.4 }); // the walk goes round the ramparts
+  parkGreen(new THREE.CircleGeometry(8.3, 28), lx, lz); // on a collar of lawn
   // stepped granite pedestal
   box(5.4, 1.3, 5.4, 0xa89c85, lx, 2.85, lz);
   const ped = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 3.1, 7.6, 4), lambert(0xb9ad97));
@@ -1220,6 +1431,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   ped.position.set(lx, 7.3, lz);
   ped.castShadow = true;
   scene.add(ped);
+  occluders.push(star, ped);
   box(4.5, 0.7, 4.5, 0xcabfa6, lx, 11.4, lz); // cornice
   box(3.2, 1.5, 3.2, 0xb3a78f, lx, 12.4, lz); // statue plinth
 
@@ -1280,7 +1492,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 
 // Governors Island with round Castle Williams (1811).
 {
-  box(13, 1.6, 8, COLORS.outerLand, 33, -0.6, 106, scene, false);
+  landSlab(OUTER_LAND.governors, 1.6, -0.6);
   const fort = new THREE.Mesh(new THREE.CylinderGeometry(4, 4.3, 4.2, 16), lambert(0xb08d6e));
   fort.position.set(31, 2.3, 105);
   fort.castShadow = true;
@@ -1295,9 +1507,11 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 
 // City Hall (1812) in its park.
 {
-  parkGreen(new THREE.CircleGeometry(4.5, 18), 2, 44);
-  tree(-1, 43, 0.8);
-  tree(5, 45, 0.9);
+  // its lawn lies between the hall's front and Wall Street, short of
+  // Federal Hall's steps on the far side of the street
+  parkGreen(new THREE.CircleGeometry(2.2, 20).scale(2.3, 1, 1), 3, 46.6);
+  tree(0.4, 46.4, 0.8);
+  tree(6, 46.9, 0.9);
   landmarkBox(10, 3, 6, 6, 2, 52); // marble, three tall storeys
   box(10.6, 0.6, 6.6, 0xc7bda5, 2, 9.3, 52);
   box(3.6, 3, 3.6, 0xded6c2, 2, 10.8, 52); // attic pavilion
@@ -1317,7 +1531,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 
 // Federal Hall (1842), Washington's statue (1883) on its steps.
 {
-  const fx = -2, fz = 38.8;
+  const fx = -2, fz = 37.2; // the foot of its steps meets Wall Street's kerb
   box(8, 1.8, 6.4, 0xcfc8b4, fx, 0.9, fz);                 // plinth
   box(8.4, 1.2, 2.2, 0xc2bba6, fx, 0.6, fz + 3.9);         // steps
   const cella = box(7.6, 5.6, 4.4, 0xcfc8b4, fx, 4.6, fz - 0.8);
@@ -1345,6 +1559,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   pedi.castShadow = true;
   scene.add(pedi);
   addCollider(fx, fz, 8, 6.4);
+  addCollider(fx, fz + 3.9, 8.4, 2.2, 0.3); // the steps, and Washington on them
   occluders.push(cella);
   landmarkInfo('Federal Hall', 1842,
     `On this Wall Street corner Washington took the first presidential oath
@@ -1488,7 +1703,7 @@ landmarkInfo('Castle Garden', null,
   `Built as a fort before the War of 1812, then the concert hall where all
    New York heard Jenny Lind in 1850, and from 1855 to 1890 the landing
    depot where eight million immigrants first touched America.`,
-  -8, 91, 9.5, { w: 9, h: 7, d: 9 });
+  CASTLE_GARDEN.x, CASTLE_GARDEN.z, 9.5, { w: 9, h: 7, d: 9 });
 landmarkInfo('Madison Square Garden', 1890,
   `Stanford White's colossal amphitheater of yellow brick and terra cotta
    opened in 1890, its arcaded tower the second-tallest thing in the city.
@@ -1562,6 +1777,7 @@ roofGeos.forEach((geos, i) => {
     const lamp = new THREE.BoxGeometry(0.26, 0.34, 0.26);
     lamp.translate(lx, 2.85, lz);
     lampGeos.push(lamp);
+    addCollider(lx, lz, 0.2, 0.2, 0.14);
   }
   if (poleGeos.length) {
     scene.add(new THREE.Mesh(mergeGeometries(poleGeos, false), lambert(0x33302c)));
@@ -1606,7 +1822,10 @@ function makeFigure(lady) {
   const usable = aveSegs.filter((a) => a.z1 - a.z0 > 30);
   for (let i = 0; i < 9 && usable.length; i++) {
     const a = usable[Math.floor(Math.random() * usable.length)];
-    const lane = Math.random() < 0.5 ? -1.9 : 1.9;
+    // along the kerb: the housefronts' colliders reach out over the
+    // sidewalk itself, and a figure set walking there is stopped at the
+    // first wall and never gets anywhere
+    const lane = Math.random() < 0.5 ? -1.15 : 1.15;
     wanderers.push({
       g: makeFigure(Math.random() < 0.4),
       x: a.x + lane,
@@ -1703,16 +1922,19 @@ function tree(x, z, s = 1) {
   for (let i = 0; i < 6; i++) {
     const a = Math.random() * Math.PI * 2, r = 2.5 + Math.random() * 4;
     const tx = -2 + Math.cos(a) * r, tz = 88 + Math.sin(a) * r;
-    if (Math.hypot(tx - 2, tz - 82) > 3 && Math.hypot(tx + 8, tz - 91) > 4.5) tree(tx, tz, 0.7 + Math.random() * 0.5);
+    // not on the birthplace marker, nor on the landing, nor anywhere between
+    // the opening camera and the statue it is looking at
+    const inShot = distToSegment(tx, tz, OPENING_CAM.x, OPENING_CAM.z, LIBERTY.x, LIBERTY.z) < 3;
+    if (Math.hypot(tx - 2, tz - 82) > 3 && tz < 92.4 && !inShot) tree(tx, tz, 0.7 + Math.random() * 0.5);
   }
 }
 // Castle Garden
 {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.5, 5, 14), lambert(COLORS.stone));
-  m.position.set(-8, 2.5, 91);
+  m.position.set(CASTLE_GARDEN.x, 2.5, CASTLE_GARDEN.z);
   m.castShadow = m.receiveShadow = true;
   scene.add(m);
-  addCollider(-8, 91, 8.5, 8.5);
+  roundColliders.push({ x: CASTLE_GARDEN.x, z: CASTLE_GARDEN.z, r: 5 });
   occluders.push(m);
 }
 
@@ -1727,6 +1949,7 @@ function tree(x, z, s = 1) {
   box(4.9, 0.6, 5.5, 0x6e4a3a, hx, 9.25, hz); // cornice
   box(1.2, 2.6, 0.3, 0x274029, hx - 1.1, 1.5, hz + 2.55); // green door
   box(2.4, 0.6, 0.7, 0xb5a98c, hx - 1.1, 0.3, hz + 3.05); // high stoop
+  addCollider(hx - 1.1, hz + 3.05, 2.4, 0.7, 0.05);
 }
 
 // Madison Square Garden (1890) with its tower and the gilded Diana.
@@ -1761,7 +1984,10 @@ let diana;
 }
 
 // The Third Avenue El: pillars, track, a station, and a little steam train.
-let train, trainDir = -1;
+// The train shuttles between the two ends of the line: it brakes into each
+// terminus, stands a moment, and pulls out again behind its whistle.
+let train, trainDir = -1, trainWay = 1, trainHalt = 0;
+const TRAIN_NORTH = -99.3, TRAIN_SOUTH = -9.7, TRAIN_SPEED = 9, TRAIN_STAND = 3.5;
 {
   const trackLen = 109;
   const bed = box(4, 0.6, trackLen, COLORS.iron, EL_X, 6.3, -54.5);
@@ -1781,19 +2007,23 @@ let train, trainDir = -1;
   const stair = box(8, 0.35, 1.8, COLORS.wood, EL_X - 5.2, 3.4, -55.2);
   stair.rotation.z = 0.72;
   addCollider(EL_X - 6.4, -55.2, 3.6, 1.8, 0.3); // the foot of the stair
-  // train
+  // train: a tank locomotive and two cars, centred on the group's origin
+  // so that turning it end for end at a terminus leaves it where it stood
   train = new THREE.Group();
-  const loco = box(2, 2.2, 4.2, 0x3a352e, 0, 7.6, 4.8, train);
+  const loco = box(2, 2.2, 4.2, 0x3a352e, 0, 7.6, 7.1, train);
   loco.castShadow = true;
+  box(2.1, 0.9, 1.5, 0x2e2a25, 0, 9.1, 5.7, train);   // cab roof, over the footplate
   const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 1.3, 8), lambert(0x26221d));
-  stack.position.set(0, 9.3, 6);
+  stack.position.set(0, 9.3, 8.3);
   train.add(stack);
   for (const off of [0, -6.8]) {
-    const car = box(2, 2.5, 5.8, COLORS.trainGreen, 0, 7.8, -1.8 + off, train);
+    const car = box(2, 2.5, 5.8, COLORS.trainGreen, 0, 7.8, 0.5 + off, train);
     car.castShadow = true;
-    box(2.3, 0.3, 6.1, 0xd8cdb2, 0, 9.2, -1.8 + off, train);
+    box(2.04, 0.7, 5.2, 0x2b3038, 0, 8.25, 0.5 + off, train, false); // the window band
+    box(2.3, 0.3, 6.1, 0xd8cdb2, 0, 9.2, 0.5 + off, train);
   }
   train.position.set(EL_X, 0, -20);
+  train.rotation.y = Math.PI; // setting out northward
   scene.add(train);
 }
 
@@ -1824,14 +2054,16 @@ let train, trainDir = -1;
 
 /* ---------------- piers & ships ---------------- */
 
-function pier(cx, cz, alongX = true) {
-  const deck = box(alongX ? 18 : 6, 0.3, alongX ? 6 : 18, COLORS.wood, cx, -0.03, cz);
+function pier(cx, cz, alongX = true, len = 18, wide = 6) {
+  const deck = box(alongX ? len : wide, 0.3, alongX ? wide : len, COLORS.wood, cx, -0.03, cz);
   deck.castShadow = true;
-  const n = 5;
+  const n = Math.max(2, Math.round(len / 4.5) + 1); // a pair of piles every few paces
+  const along = len / 2 - 1, across = wide / 2 - 0.5;
   for (let i = 0; i < n; i++) {
-    const t = -1 + (2 * i) / (n - 1);
-    box(0.5, 1.6, 0.5, COLORS.woodDark, cx + (alongX ? t * 8 : 2.5), -0.6, cz + (alongX ? 2.5 : t * 8), scene, false);
-    box(0.5, 1.6, 0.5, COLORS.woodDark, cx + (alongX ? t * 8 : -2.5), -0.6, cz + (alongX ? -2.5 : t * 8), scene, false);
+    const t = (-1 + (2 * i) / (n - 1)) * along;
+    for (const side of [-across, across]) {
+      box(0.5, 1.6, 0.5, COLORS.woodDark, cx + (alongX ? t : side), -0.6, cz + (alongX ? side : t), scene, false);
+    }
   }
 }
 
@@ -1841,6 +2073,7 @@ function barrels(cx, cz) {
     b.position.set(cx + Math.random() * 1.6 - 0.8, 0.57, cz + Math.random() * 1.6 - 0.8);
     b.castShadow = true;
     scene.add(b);
+    addCollider(b.position.x, b.position.z, 1, 1, 0.15);
   }
 }
 
@@ -1850,74 +2083,303 @@ pier(-49, -12);
   const office = box(3.6, 2.8, 3, 0xa8a092, -53.5, 1.5, -12);
   office.castShadow = true;
   box(4, 0.4, 3.4, 0x6e6457, -53.5, 3.05, -12);
+  addCollider(-53.5, -12, 3.6, 3, 0.3); // leaves a walk down either side to the pier's end
   barrels(-45, -10.5);
 }
 // East River pier
 pier(49, -95);
 barrels(45, -93.5);
+// The landing stages of the boat to the statue: one running out from the
+// tip of the Battery, one on the near side of Bedloe's Island.
+pier(-1, 98.5, false, 10, 4);
+pier(-32.4, 104, true, 4.7, 4);
 
 const bobbers = []; // things that ride the water
 
-function sailShip(x, z, scale = 1, rotY = 0) {
-  const g = new THREE.Group();
-  const hull = box(3, 1.5, 11, 0x4e4338, 0, 0.6, 0, g);
-  hull.castShadow = true;
-  box(2.6, 0.8, 2.6, 0x5d5043, 0, 1.7, -3.8, g); // stern cabin
-  const bow = new THREE.Mesh(new THREE.ConeGeometry(1.5, 3, 4), lambert(0x4e4338));
-  bow.rotation.x = -Math.PI / 2;
-  bow.rotation.y = Math.PI / 4;
-  bow.position.set(0, 0.6, 7);
-  g.add(bow);
-  for (const mz of [2.4, -1.6]) {
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 10, 6), lambert(COLORS.woodDark));
-    mast.position.set(0, 6, mz);
-    g.add(mast);
-    for (const sy of [4.2, 6.8, 8.8]) {
-      const sail = new THREE.Mesh(
-        new THREE.PlaneGeometry(3.6 - (sy - 4) * 0.3, 2),
-        new THREE.MeshLambertMaterial({ color: COLORS.sailcloth, side: THREE.DoubleSide })
-      );
-      sail.position.set(0, sy, mz);
-      sail.castShadow = true;
-      g.add(sail);
-    }
+// A hull seen from above: full in the belly, drawn to a sharp stem and
+// narrowed at the transom. `stern` is the transom's width as a fraction of
+// the beam; the bow points toward +z. Drawn into a Shape or a Path, so the
+// same outline serves for hulls, decks, and the hole in a bulwark.
+function hullOutline(path, beam, len, stern) {
+  const h = beam / 2, a = -len / 2, b = len / 2;
+  path.moveTo(-h * stern, a);
+  path.lineTo(h * stern, a);
+  path.bezierCurveTo(h * 1.02, a + len * 0.12, h, a + len * 0.3, h, a + len * 0.45);
+  path.bezierCurveTo(h, a + len * 0.72, h * 0.55, b - len * 0.1, 0, b);
+  path.bezierCurveTo(-h * 0.55, b - len * 0.1, -h, a + len * 0.72, -h, a + len * 0.45);
+  path.bezierCurveTo(-h, a + len * 0.3, -h * 1.02, a + len * 0.12, -h * stern, a);
+  return path;
+}
+
+// A slab in the shape of a hull, its top face at `top`; with `wall` it is
+// only the rim, that thick — a bulwark around the deck.
+function hullSlab(beam, len, stern, depth, top, color, parent, wall = 0) {
+  const shape = hullOutline(new THREE.Shape(), beam, len, stern);
+  if (wall) shape.holes.push(hullOutline(new THREE.Path(), beam - wall * 2, len - wall * 2.4, stern));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 5 });
+  geo.rotateX(Math.PI / 2); // shape (x, y) -> (x, z); the slab hangs down from y = 0
+  const m = new THREE.Mesh(geo, lambert(color));
+  m.position.y = top;
+  m.castShadow = true;
+  parent.add(m);
+  return m;
+}
+
+// The hull common to every ship: a dark body, a buff strake along the
+// rail, and a holystoned deck inside it. Returns the deck's height.
+function shipHull(g, beam, len, stern, hullColor) {
+  hullSlab(beam, len, stern, 1.6, 1.3, hullColor, g);
+  hullSlab(beam + 0.14, len + 0.16, stern, 0.4, 1.62, 0xcdbf9d, g, 0.2); // the rail
+  hullSlab(beam - 0.3, len - 0.4, stern, 0.06, 1.36, 0xa89069, g).castShadow = false; // the deck
+  return 1.36;
+}
+
+const sailMat = new THREE.MeshLambertMaterial({ color: COLORS.sailcloth, side: THREE.DoubleSide });
+// A square sail bellied forward by the wind, hung from its yard.
+function squareSail(g, w, h, y, z, belly) {
+  const geo = new THREE.PlaneGeometry(w, h, 4, 3);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const u = pos.getX(i) / (w / 2);          // -1..1 across the sail
+    const drop = 0.5 - pos.getY(i) / h;       // 0 at the yard, 1 at the foot
+    // pinned along the yard and at both leeches, fullest two-thirds of the way down
+    pos.setZ(i, belly * (1 - u * u) * Math.sin(drop * Math.PI * 0.75));
   }
+  geo.computeVertexNormals();
+  const sail = new THREE.Mesh(geo, sailMat);
+  sail.position.set(0, y, z);
+  sail.castShadow = true;
+  g.add(sail);
+}
+
+// a flat piece of canvas between any corners — jibs, spankers, pennants
+function canvasPanel(g, pts, mat = sailMat) {
+  const geo = new THREE.BufferGeometry();
+  const v = [];
+  for (let i = 1; i < pts.length - 1; i++) v.push(...pts[0], ...pts[i], ...pts[i + 1]);
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array((v.length / 3) * 2), 2));
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, mat);
+  m.castShadow = true;
+  g.add(m);
+}
+const pennantMat = new THREE.MeshLambertMaterial({ color: COLORS.red, side: THREE.DoubleSide });
+
+// A brig: two square-rigged masts, a jib on the bowsprit, a spanker aft.
+// Under way she carries everything; moored at a pier her canvas is furled
+// along the yards.
+function sailShip(x, z, scale = 1, rotY = 0, { furled = false } = {}) {
+  const g = new THREE.Group();
+  const deck = shipHull(g, 3.2, 14, 0.62, 0x3f362d);
+  g.children.forEach((m) => { m.position.z = 0.8; }); // the stem reaches forward of the masts
+  box(2.2, 0.85, 2.6, 0x5d5043, 0, deck + 0.42, -4.3, g); // stern cabin
+  box(2.4, 0.1, 2.8, 0x8a7b62, 0, deck + 0.9, -4.3, g);
+  const v3 = (px, py, pz) => new THREE.Vector3(px, py, pz);
+  const spar = (p1, p2, r) => { cylBetween(p1, p2, r, COLORS.woodDark, g).castShadow = true; };
+  const line = (p1, p2) => cylBetween(p1, p2, 0.03, COLORS.ink, g); // standing rigging
+  const top = deck + 10.4;
+  spar(v3(0, 1.75, 7.6), v3(0, 2.9, 11.4), 0.1); // bowsprit
+  for (const mz of [3.1, -1.5]) {
+    spar(v3(0, deck, mz), v3(0, top, mz), 0.14);
+    // course, topsail, topgallant: [yard height, width, drop]
+    for (const [sy, w, h] of [[deck + 4.5, 4.4, 2.7], [deck + 7.1, 3.6, 2.3], [deck + 9.3, 2.8, 1.8]]) {
+      spar(v3(-w / 2 - 0.2, sy, mz + 0.16), v3(w / 2 + 0.2, sy, mz + 0.16), 0.07); // the yard
+      if (furled) {
+        const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, w, 6).rotateZ(Math.PI / 2), sailMat);
+        roll.position.set(0, sy - 0.17, mz + 0.2);
+        g.add(roll);
+      } else {
+        squareSail(g, w, h, sy - h / 2 - 0.08, mz + 0.2, 0.55);
+      }
+    }
+    line(v3(1.5, deck + 0.3, mz - 0.9), v3(0, top - 1.2, mz)); // shrouds
+    line(v3(-1.5, deck + 0.3, mz - 0.9), v3(0, top - 1.2, mz));
+  }
+  line(v3(0, 2.85, 11.2), v3(0, top - 0.6, 3.1));   // forestay
+  line(v3(0, top - 0.3, 3.1), v3(0, top - 0.3, -1.5)); // triatic stay, masthead to masthead
+  if (!furled) {
+    canvasPanel(g, [[0, 2.75, 10.6], [0, deck + 6.2, 4.4], [0, deck + 1.6, 5.2]]);                        // jib
+    canvasPanel(g, [[0, deck + 1.3, -1.9], [0, deck + 5.6, -1.9], [0, deck + 5.0, -5.2], [0, deck + 1.3, -5.9]]); // spanker
+  }
+  canvasPanel(g, [[0, top + 0.05, -1.5], [0, top - 0.45, -1.5], [0, top - 0.2, -3.1]], pennantMat);
   g.position.set(x, 0, z);
   g.rotation.order = 'YXZ'; // heading first, so pitch and roll stay in the hull's frame
   g.rotation.y = rotY;
   g.scale.setScalar(scale);
-  g.userData.stern = -5.5; // where the wake starts, in local units
+  g.userData.stern = -6.2; // where the wake starts, in local units
   scene.add(g);
-  bobbers.push({ obj: g, half: 5 * scale, beam: 1.5 * scale });
+  bobbers.push({ obj: g, half: 6 * scale, beam: 1.5 * scale });
   return g;
 }
 
+// A side-wheel steamer of the harbor: black hull, white house, paddle
+// boxes amidships, and a tall banded funnel.
 function steamShip(x, z, rotY = 0) {
   const g = new THREE.Group();
-  const hull = box(3.4, 1.6, 13, 0x3c3a36, 0, 0.6, 0, g);
-  hull.castShadow = true;
-  box(2.6, 1.4, 6, 0xe5dcc4, 0, 2, -0.5, g);
-  const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 2.6, 8), lambert(0x26221d));
-  stack.position.set(0, 3.8, 0.5);
-  g.add(stack);
+  const deck = shipHull(g, 3.6, 15, 0.74, 0x2f2d2a);
+  const cabin = box(2.5, 1.3, 7, 0xe5dcc4, 0, deck + 0.65, -0.4, g);
+  cabin.castShadow = true;
+  box(2.54, 0.42, 6.4, 0x3a4046, 0, deck + 0.8, -0.4, g, false);  // a band of cabin windows
+  box(3, 0.12, 7.6, 0xcabfa6, 0, deck + 1.36, -0.4, g);           // the hurricane deck
+  box(1.5, 0.95, 1.5, 0xe5dcc4, 0, deck + 1.9, 2.1, g);           // pilot house
+  box(1.54, 0.3, 1.54, 0x3a4046, 0, deck + 2.0, 2.1, g, false);
+  box(1.8, 0.1, 1.8, 0xcabfa6, 0, deck + 2.42, 2.1, g);
+  for (const side of [-1, 1]) { // paddle boxes
+    const pb = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.55, 1.55, 0.75, 12, 1, false, 0, Math.PI).rotateZ(Math.PI / 2),
+      lambert(0xd8cdb2)
+    );
+    pb.position.set(side * 2.0, deck - 0.25, -0.2);
+    pb.castShadow = true;
+    g.add(pb);
+  }
+  const funnelY = deck + 2.9, funnelZ = -1.2;
+  const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.54, 3, 10), lambert(0x26221d));
+  stack.position.set(0, funnelY, funnelZ);
+  stack.castShadow = true;
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.51, 0.5, 10), lambert(COLORS.red));
+  band.position.set(0, funnelY + 0.8, funnelZ);
+  g.add(stack, band);
+  cylBetween(new THREE.Vector3(0, deck, 5.2), new THREE.Vector3(0, deck + 4.2, 5.2), 0.07, COLORS.woodDark, g); // jackstaff
+  canvasPanel(g, [[0, deck + 4.15, 5.2], [0, deck + 3.6, 5.2], [0, deck + 3.87, 4.0]], pennantMat);
   g.position.set(x, 0, z);
   g.rotation.order = 'YXZ';
   g.rotation.y = rotY;
-  g.userData.stern = -6.5;
+  g.userData.stern = -7.4;
+  g.userData.funnel = { y: funnelY + 1.55, z: funnelZ }; // where the smoke leaves
   scene.add(g);
-  bobbers.push({ obj: g, half: 6, beam: 1.7 });
+  bobbers.push({ obj: g, half: 7, beam: 1.8 });
   return g;
 }
 
-sailShip(-53, -20, 0.9);            // moored at the customs pier
-sailShip(52.5, -86.5, 0.85);        // moored at the East River pier
-// Ships under way: each drifts along one axis, then wraps around for
-// another pass. The steamers trail coal smoke.
+sailShip(-53, -26.5, 0.9, 0, { furled: true });   // moored at the customs pier
+sailShip(52.5, -85.8, 0.85, 0, { furled: true }); // moored at the East River pier
+// Ships under way. Each works one reach of water between two marks `a`
+// and `b` on one axis: she slows as she nears a mark, comes about, and
+// stands back the way she came. The reaches are chosen to keep every hull
+// in open water with room to swing. The steamers trail coal smoke.
+function drifter(obj, axis, a, b, speed, smokes = false) {
+  const dir = Math.sign(b - obj.position[axis]); // she sets out for `b`
+  obj.rotation.y = axis === 'z' ? (dir > 0 ? 0 : Math.PI) : dir * Math.PI / 2;
+  return { obj, axis, a, b, speed, smokes, mark: b, way: 1, turn: 0, fromYaw: 0 };
+}
 const drifters = [
-  { obj: sailShip(-62, 70, 1, Math.PI), axis: 'z', vel: -3.2, limit: -115, reset: 95 },        // beating up the Hudson
-  { obj: steamShip(40.5, 55, Math.PI), axis: 'z', vel: -4, limit: -38, reset: 62, smokes: true },   // steaming up the East River
-  { obj: steamShip(-60, 98, Math.PI / 2), axis: 'x', vel: 4.5, limit: 110, reset: -110, smokes: true }, // harbor ferry, hugging the Battery
+  drifter(sailShip(-62, 60, 1), 'z', 78, -150, 3.2),          // beating up the Hudson, past the customs pier
+  drifter(steamShip(42.5, 40), 'z', 64, -22, 4, true),        // the East River boat, under the bridge and back
 ];
+const COME_ABOUT = 9; // seconds to swing a hull end for end
+function updateDrifters(dt) {
+  for (const d of drifters) {
+    const p = d.obj.position;
+    if (d.turn > 0) {
+      d.turn = Math.max(0, d.turn - dt / COME_ABOUT);
+      d.obj.rotation.y = d.fromYaw + Math.PI * smoothstep01(1 - d.turn);
+      d.way = 0;
+      continue;
+    }
+    const left = Math.abs(d.mark - p[d.axis]);
+    // she carries her way until the last few lengths, then loses it
+    const goal = Math.min(1, 0.12 + left / 16);
+    d.way += (goal - d.way) * Math.min(1, dt * (goal > d.way ? 0.45 : 3));
+    const step = d.speed * d.way * dt;
+    if (step < left) {
+      p[d.axis] += Math.sign(d.mark - p[d.axis]) * step;
+    } else { // at the mark: put the helm over
+      p[d.axis] = d.mark;
+      d.turn = 1;
+      d.fromYaw = d.obj.rotation.y;
+      d.mark = d.mark === d.b ? d.a : d.b;
+    }
+  }
+}
+
+// The boat to the Statue of Liberty: an open steam launch, built to the
+// walker's own scale because he stands in her bow. She lies at whichever
+// landing he is at, stern to the stage; boarding her starts the crossing,
+// and once she has set him ashore she swings round to be ready to return.
+const LAUNCH_DECK = 0.8;
+function steamLaunch() {
+  const g = new THREE.Group();
+  hullSlab(2.6, 9, 0.7, 1.0, 0.75, 0x2f2d2a, g);
+  hullSlab(2.74, 9.16, 0.7, 0.32, 0.97, 0xcdbf9d, g, 0.17);                       // the rail
+  hullSlab(2.3, 8.6, 0.7, 0.06, LAUNCH_DECK, 0xa89069, g).castShadow = false;     // the deck
+  const boiler = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1, 10), lambert(0x3a352e));
+  boiler.position.set(0, LAUNCH_DECK + 0.5, 0.2);
+  const funnel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 2.5, 8), lambert(0x26221d));
+  funnel.position.set(0, LAUNCH_DECK + 2.25, 0.2);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.24, 0.35, 8), lambert(COLORS.red));
+  band.position.set(0, LAUNCH_DECK + 2.95, 0.2);
+  boiler.castShadow = funnel.castShadow = true;
+  g.add(boiler, funnel, band);
+  box(2.3, 0.08, 3.6, 0xd8cdb2, 0, LAUNCH_DECK + 2.45, -2.5, g);                  // an awning over the benches aft
+  for (const sx of [-1.05, 1.05]) {
+    box(0.4, 0.3, 3.2, 0x8a6f4d, sx * 0.76, LAUNCH_DECK + 0.2, -2.5, g, false);
+    for (const sz of [-4.2, -0.8]) {
+      cylBetween(new THREE.Vector3(sx, LAUNCH_DECK, sz), new THREE.Vector3(sx, LAUNCH_DECK + 2.45, sz), 0.04, COLORS.woodDark, g);
+    }
+  }
+  cylBetween(new THREE.Vector3(0, LAUNCH_DECK, 4), new THREE.Vector3(0, LAUNCH_DECK + 2.6, 4), 0.05, COLORS.woodDark, g); // jackstaff
+  canvasPanel(g, [[0, LAUNCH_DECK + 2.55, 4], [0, LAUNCH_DECK + 2.05, 4], [0, LAUNCH_DECK + 2.3, 2.95]], pennantMat);
+  g.rotation.order = 'YXZ';
+  g.userData.stern = -4.6;
+  g.userData.funnel = { y: LAUNCH_DECK + 3.55, z: 0.2 };
+  scene.add(g);
+  bobbers.push({ obj: g, half: 4.5, beam: 1.3 });
+  return g;
+}
+const LAUNCH_CROSSING = 10; // seconds from one landing to the other
+const LAUNCH_SWING = 6;     // and to swing her end for end afterwards
+const launch = { obj: steamLaunch(), at: 'battery', dest: 'bedloes', phase: 'moored', u: 0, way: 0, fromYaw: 0, greeted: false };
+{
+  const [ax, az] = LANDINGS.battery.berth, [bx, bz] = LANDINGS.bedloes.berth;
+  launch.obj.position.set(ax, 0, az);
+  launch.obj.rotation.y = Math.atan2(bx - ax, bz - az); // bow toward the statue
+}
+function boardLaunch() {
+  if (launch.phase !== 'moored' || state.modal) return;
+  launch.phase = 'crossing';
+  launch.dest = launch.at === 'battery' ? 'bedloes' : 'battery';
+  launch.u = 0;
+  state.riding = true;
+  vel.x = vel.z = 0;
+  audio.play('horn', { freq: 147, gain: 0.2, dur: 1.2 });
+}
+const _rider = new THREE.Vector3();
+function updateLaunch(dt) {
+  const L = launch;
+  if (L.phase === 'crossing') {
+    L.u = Math.min(1, L.u + dt / LAUNCH_CROSSING);
+    const [fx, fz] = LANDINGS[L.at].berth, [tx, tz] = LANDINGS[L.dest].berth;
+    const e = smoothstep01(L.u);
+    L.obj.position.x = fx + (tx - fx) * e;
+    L.obj.position.z = fz + (tz - fz) * e;
+    L.way = Math.min(1, 6 * L.u * (1 - L.u)); // she gathers way, and loses it coming alongside
+    if (L.u >= 1) { // alongside: the passenger steps onto the stage, and she swings
+      L.at = L.dest;
+      L.phase = 'swinging';
+      L.u = 0;
+      L.way = 0;
+      L.fromYaw = L.obj.rotation.y;
+      state.riding = false;
+      const [sx, sz] = LANDINGS[L.at].ashore;
+      player.position.set(sx, 0, sz);
+      if (L.at === 'bedloes' && !L.greeted) {
+        L.greeted = true;
+        toast('Bedloe’s Island. Walk round the ramparts — tap the statue to read her story. The boat waits at the landing.', 6500);
+      }
+    }
+  } else if (L.phase === 'swinging') {
+    L.u = Math.min(1, L.u + dt / LAUNCH_SWING);
+    L.obj.rotation.y = L.fromYaw + Math.PI * smoothstep01(L.u);
+    if (L.u >= 1) L.phase = 'moored';
+  }
+  if (state.riding) { // he stands in the bow, and rides the swell with her
+    L.obj.updateMatrixWorld();
+    player.position.copy(L.obj.localToWorld(_rider.set(0, LAUNCH_DECK, 2.4)));
+    player.rotation.y = L.obj.rotation.y;
+  }
+}
 
 // The whale, off the Battery. Of course there is a whale.
 let whale, spout;
@@ -2131,13 +2593,14 @@ const wake = makeParticles({
 });
 // every smoking prop: emit cadence and the funnel tip in local coordinates
 const smokeSources = [
-  { obj: train, period: 0.3, tipY: 9.95, tipZ: 6, vy: 2.4, t: 0 },
+  { obj: train, period: 0.3, tipY: 9.95, tipZ: 8.3, vy: 2.4, t: 0 },
   ...drifters
     .filter((d) => d.smokes)
-    .map((d) => ({ obj: d.obj, period: 0.45, tipY: 5.1, tipZ: 0.5, vy: 1.7, t: 0 })),
+    .map((d) => ({ obj: d.obj, period: 0.45, tipY: d.obj.userData.funnel.y, tipZ: d.obj.userData.funnel.z, vy: 1.7, t: 0 })),
 ];
-// every ship under way trails foam from its stern
-const wakeSources = drifters.map((d) => ({ obj: d.obj, period: 0.14, tipY: 0.45, tipZ: d.obj.userData.stern, vy: 0, t: 0 }));
+smokeSources.push({ obj: launch.obj, period: 0.6, tipY: launch.obj.userData.funnel.y, tipZ: launch.obj.userData.funnel.z, vy: 1.3, t: 0 });
+// every ship under way trails foam from its stern — as much as she has way on
+const wakeSources = [...drifters, launch].map((d) => ({ ship: d, obj: d.obj, period: 0.14, tipY: 0.45, tipZ: d.obj.userData.stern, t: 0 }));
 
 // "The Tide Turns": once the chart is complete the whole island settles
 // into a permanent golden hour. warmth runs 0 (day) to 1 (dusk).
@@ -2160,6 +2623,7 @@ function applyDusk(w) {
   sunDirCur.lerpVectors(SUN_DIR_DAY, SUN_DIR_DUSK, w).normalize();
   sunSprite.material.color.lerpColors(SUNDISC_DAY, SUNDISC_DUSK, w);
   sunSprite.scale.setScalar(110 * (1 + 0.45 * w));
+  waterUniforms.uSkyTint.value.lerpColors(WATER_SKY_DAY, WATER_SKY_DUSK, w);
 }
 
 /* ---------------- site markers ---------------- */
@@ -2231,9 +2695,17 @@ armL.castShadow = armR.castShadow = true;
 player.add(armL, armR);
 player.rotation.order = 'YXZ'; // heading first, so the walking lean stays in his own frame
 player.scale.setScalar(0.58); // a man among five-storey buildings
-player.position.set(0, 0, 70);
+player.position.set(START.x, 0, START.z);
 player.rotation.y = Math.PI; // facing north, up the island
 scene.add(player);
+
+// The opening view looks past him, out across the harbor to the statue —
+// so it is plain from the first frame that she is there, and that the
+// landing behind him is the way to her. A moment later the camera swings
+// round to the city, unless the walker has already taken charge of it.
+cam.height = OPENING_HEIGHT;
+cam.yaw = OPENING_YAW;
+let opening = 0; // seconds since stepping ashore; -1 once the view is the walker's own
 
 camera.position.set(
   player.position.x + Math.sin(cam.yaw) * cam.dist,
@@ -2289,6 +2761,8 @@ function onUi(e) {
 window.addEventListener('pointerdown', (e) => {
   if (finale) { skipFinale(); return; }
   if (!state.started || state.modal || onUi(e)) return;
+  // a right- or middle-button press is the browser's (its menu, its scroll), not a look-drag
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
   // keep receiving the drag even if the pointer leaves the window
   try { e.target.setPointerCapture(e.pointerId); } catch { /* not a capturable target */ }
   const wantsJoy = e.pointerType === 'touch' && e.clientX < window.innerWidth * 0.45;
@@ -2349,7 +2823,7 @@ window.addEventListener('wheel', (e) => {
 
 /* ---------------- UI ---------------- */
 
-const state = { started: false, modal: false, visitedCount: 0, nearSite: null, epilogueShown: false, view: 'street' };
+const state = { started: false, modal: false, visitedCount: 0, nearSite: null, nearBoat: false, riding: false, epilogueShown: false, view: 'street' };
 
 // The chart remembers: visited sites persist across sessions.
 const SAVE_KEY = 'melville-charted-v1';
@@ -2459,7 +2933,8 @@ document.getElementById('start-btn').addEventListener('click', () => {
   if (window.innerWidth < 700 || window.innerHeight < 500) document.getElementById('chart-key').removeAttribute('open');
   toast(save.charted.length > 0
     ? 'Back ashore. The chart remembers what you have already found.'
-    : 'You step ashore at the Battery. Six red markers wait on the island — the compass points to the nearest.');
+    : 'You step ashore at the Battery. Six red markers wait on the island — the compass points to the nearest. The boat at the landing crosses to the Statue of Liberty.',
+    save.charted.length > 0 ? 4200 : 7500);
   showTouchHint();
 });
 
@@ -2478,9 +2953,11 @@ releasePointerFocus(muteBtn);
 audio.setMuted(save.muted);
 reflectMute();
 
+// The one prompt serves both: a site to visit, or the boat to board.
 function tryVisit() {
-  if (!state.nearSite || state.modal) return;
-  openCard(state.nearSite);
+  if (state.modal || state.riding) return;
+  if (state.nearBoat) boardLaunch();
+  else if (state.nearSite) openCard(state.nearSite);
 }
 visitBtn.addEventListener('click', tryVisit);
 
@@ -2641,7 +3118,7 @@ function showEpilogue() {
 // tap skips it; the dusk it leaves behind is permanent.
 let finale = null;
 let finaleQueued = false; // armed on the sixth card-close; lifts off once the pin FX has played
-const LIBERTY_LOOK = new THREE.Vector3(-33, 15, 107);
+const LIBERTY_LOOK = new THREE.Vector3(LIBERTY.x + 1, 15, LIBERTY.z);
 function startFinale() {
   if (state.view === 'chart') toggleView();
   state.modal = true; // freezes the walker and hides the visit button
@@ -2753,18 +3230,65 @@ function moveInput() {
   return [mx, mz];
 }
 
+// Push a point out of every collider it has strayed into, by the shortest
+// way out of each. Two passes: being pushed out of one box can land the
+// point just inside a neighbour already checked (an inside corner between
+// two stoops, say), and the second pass settles that the same frame.
 function collide(px, pz) {
-  for (const c of colliders) {
-    if (px > c.x0 && px < c.x1 && pz > c.z0 && pz < c.z1) {
-      const dxl = px - c.x0, dxr = c.x1 - px, dzl = pz - c.z0, dzr = c.z1 - pz;
-      const m = Math.min(dxl, dxr, dzl, dzr);
-      if (m === dxl) px = c.x0;
-      else if (m === dxr) px = c.x1;
-      else if (m === dzl) pz = c.z0;
-      else pz = c.z1;
+  for (let pass = 0; pass < 2; pass++) {
+    let hit = false;
+    for (const c of colliders) {
+      if (px > c.x0 && px < c.x1 && pz > c.z0 && pz < c.z1) {
+        const dxl = px - c.x0, dxr = c.x1 - px, dzl = pz - c.z0, dzr = c.z1 - pz;
+        const m = Math.min(dxl, dxr, dzl, dzr);
+        if (m === dxl) px = c.x0;
+        else if (m === dxr) px = c.x1;
+        else if (m === dzl) pz = c.z0;
+        else pz = c.z1;
+        hit = true;
+      }
     }
+    for (const c of roundColliders) { // straight out from the centre
+      const dx = px - c.x, dz = pz - c.z, d = Math.hypot(dx, dz);
+      if (d < c.r) {
+        px = d > 1e-6 ? c.x + (dx / d) * c.r : c.x + c.r;
+        pz = d > 1e-6 ? c.z + (dz / d) * c.r : c.z;
+        hit = true;
+      }
+    }
+    if (!hit) break;
   }
   return [px, pz];
+}
+
+// One step of the walk from (px, pz) by (dx, dz), kept on dry land. Most
+// of the shoreline runs at a slant, so a step that would leave the island
+// is turned to run along the nearest stretch of shore — the walker slides
+// along the seawall instead of stopping dead against it. Failing that
+// (a corner of the island, the square edge of a pier) the step is tried
+// one axis at a time.
+function shoreStep(px, pz, dx, dz) {
+  if (isWalkable(px + dx, pz + dz)) return [px + dx, pz + dz];
+  if (pointInPoly(px, pz)) {
+    let best = Infinity, tx = 0, tz = 0;
+    for (let i = 0; i < ISLAND.length; i++) {
+      const [ax, az] = ISLAND[i];
+      const [bx, bz] = ISLAND[(i + 1) % ISLAND.length];
+      const d = distToSegment(px, pz, ax, az, bx, bz);
+      if (d < best) {
+        best = d;
+        const len = Math.hypot(bx - ax, bz - az);
+        tx = (bx - ax) / len;
+        tz = (bz - az) / len;
+      }
+    }
+    const along = dx * tx + dz * tz;
+    if (isWalkable(px + tx * along, pz + tz * along)) return [px + tx * along, pz + tz * along];
+  }
+  let nx = px + dx, nz = pz + dz;
+  if (!isWalkable(nx, pz)) nx = px;
+  if (!isWalkable(nx, nz)) nz = pz;
+  return [nx, nz];
 }
 
 function angleLerp(a, b, t) {
@@ -2793,9 +3317,47 @@ function placeChartLabel(L) {
   L.el.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px) translate(-50%, -50%)`;
 }
 
+// The title card is opaque, so nothing behind it needs drawing: a few
+// frames are rendered to compile the shaders and upload the textures (so
+// stepping ashore does not stutter), and then the loop idles until the
+// walk begins.
+let warmupFrames = 4;
+
+// Resolution follows the machine. If the frame rate stays poor the canvas
+// is drawn at a lower pixel ratio, a step at a time, and as a last resort
+// the shadow map is halved; a machine that keeps up is never touched.
+// (A display capped at 30 Hz to save power sits above the trigger.)
+const perf = { time: 0, frames: 0, grace: 3, ratio: Math.min(window.devicePixelRatio || 1, 2) };
+function watchFrameRate(rawDt) {
+  if (rawDt > 0.25) return; // a hitch, or the tab was hidden: not the machine's pace
+  if (perf.grace > 0) { perf.grace -= rawDt; return; }
+  perf.time += rawDt;
+  perf.frames++;
+  if (perf.time < 2.5) return;
+  const fps = perf.frames / perf.time;
+  perf.time = perf.frames = 0;
+  if (fps >= 24) return;
+  if (perf.ratio > 1) {
+    perf.ratio = Math.max(1, perf.ratio - 0.5);
+    renderer.setPixelRatio(perf.ratio);
+  } else if (sun.shadow.mapSize.x > 1024) {
+    sun.shadow.mapSize.set(1024, 1024);
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } // rebuilt at the new size
+    applyShadowFrustum(state.view);
+  }
+  perf.grace = 1.5; // let the change settle before judging again
+}
+
 function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const rawDt = clock.getDelta();
+  if (!state.started) {
+    if (warmupFrames <= 0) return;
+    warmupFrames--;
+  } else if (!finale) {
+    watchFrameRate(rawDt);
+  }
+  const dt = Math.min(rawDt, 0.05);
   const t = clock.elapsedTime;
 
   // --- player (movement is camera-relative; chart view is north-up) ---
@@ -2806,7 +3368,7 @@ function animate() {
   // the input is a goal velocity; the walker eases into his stride and
   // takes a short step to stop, rather than snapping between the two
   let goalX = 0, goalZ = 0;
-  if (state.started && !state.modal) {
+  if (state.started && !state.modal && !state.riding) {
     const [mx, mz] = moveInput();
     goalX = rightX * mx + fwdX * -mz;
     goalZ = rightZ * mx + fwdZ * -mz;
@@ -2818,10 +3380,7 @@ function animate() {
   let moving = Math.hypot(vel.x, vel.z);
   if (moving < 0.01) { vel.x = vel.z = 0; moving = 0; }
   if (moving > 0) {
-    let nx = player.position.x + vel.x * SPEED * dt;
-    let nz = player.position.z + vel.z * SPEED * dt;
-    if (!isWalkable(nx, player.position.z)) nx = player.position.x;
-    if (!isWalkable(nx, nz)) nz = player.position.z;
+    let [nx, nz] = shoreStep(player.position.x, player.position.z, vel.x * SPEED * dt, vel.z * SPEED * dt);
     [nx, nz] = collide(nx, nz);
     if (isWalkable(nx, nz)) player.position.set(nx, 0, nz);
     player.rotation.y = angleLerp(player.rotation.y, Math.atan2(vel.x, vel.z), 1 - Math.pow(0.00001, dt));
@@ -2837,7 +3396,7 @@ function animate() {
   // each leg-swing crossing is a footfall — planks on the piers, stone ashore
   const stepSign = Math.sin(walkPhase) >= 0;
   if (moving > 0.01 && stepSign !== lastStepSign) {
-    audio.play(pointInPoly(player.position.x, player.position.z) ? 'step' : 'stepWood');
+    audio.play(onPlanks(player.position.x, player.position.z) ? 'stepWood' : 'step');
   }
   lastStepSign = stepSign;
 
@@ -2861,8 +3420,29 @@ function animate() {
     _camPos.copy(CHART_CAM_POS);
     _lookGoal.copy(CHART_LOOK_AT);
   } else {
+    if (opening >= 0) {
+      opening += dt;
+      if (wantsToMove || state.riding || cam.lastDrag >= 0) {
+        opening = -1; // the walker has taken charge of the view
+      } else if (opening > 2.6) {
+        const k = 1 - Math.pow(0.3, dt);
+        cam.yaw = angleLerp(cam.yaw, 0, k); // round to the city, behind him
+        cam.height += (5 - cam.height) * k; // and up to the usual vantage
+        if (Math.abs(Math.atan2(Math.sin(cam.yaw), Math.cos(cam.yaw))) < 0.02) { opening = -1; cam.height = 5; }
+      }
+    }
+    // aboard the boat the camera rides astern of her
+    if (state.riding && t - cam.lastDrag > 2.2) {
+      cam.yaw = angleLerp(cam.yaw, launch.obj.rotation.y + Math.PI, 1 - Math.pow(0.2, dt));
+    }
     if (moving > 0.05 && t - cam.lastDrag > 2.2) {
-      cam.yaw = angleLerp(cam.yaw, Math.atan2(vel.x, vel.z) + Math.PI, 1 - Math.pow(0.55, dt));
+      // The camera swings in behind the walker — but only as far as he is
+      // walking away from it or across its view. His heading is steered
+      // relative to the camera, so swinging behind a man who is walking
+      // toward the lens turns him as it turns, and he circles for ever.
+      const away = (vel.x * fwdX + vel.z * fwdZ) / moving; // 1 walking away, -1 straight at the camera
+      const follow = smoothstep01(Math.max(0, Math.min(1, (away + 0.85) / 0.85)));
+      cam.yaw = angleLerp(cam.yaw, Math.atan2(vel.x, vel.z) + Math.PI, (1 - Math.pow(0.55, dt)) * follow);
     }
     _head.set(player.position.x, 1.9, player.position.z);
     _toCam.set(
@@ -2892,8 +3472,7 @@ function animate() {
   const fv = FOG_VIEWS[state.view];
   scene.fog.near += (fv.near - scene.fog.near) * Math.min(1, dt * 2);
   scene.fog.far += (fv.far - scene.fog.far) * Math.min(1, dt * 2);
-  sun.position.set(player.position.x + 70, 100, player.position.z + 45);
-  sun.target.position.set(player.position.x, 0, player.position.z);
+  aimSun(state.view, player.position.x, player.position.z);
 
   // --- the sun's disc and the clouds belong to the street sky only;
   // from the chart's altitude they would hang between camera and island ---
@@ -2916,10 +3495,15 @@ function animate() {
   state.nearSite = near;
 
   // --- visit prompt, recomputed from proximity + modal state each frame ---
-  const promptOn = !!near && state.started && !state.modal;
+  // the boat can be boarded from the end of whichever landing she lies at
+  const [gx, gz] = LANDINGS[launch.at].gangway;
+  state.nearBoat = launch.phase === 'moored' && Math.hypot(player.position.x - gx, player.position.z - gz) < 3;
+  const promptOn = (state.nearBoat || !!near) && state.started && !state.modal && !state.riding;
   visitBtn.classList.toggle('hidden', !promptOn);
   if (promptOn) {
-    const label = `${near.visited ? 'Revisit' : 'Visit'}: ${near.shortTitle}`;
+    const label = state.nearBoat
+      ? (launch.at === 'battery' ? 'Boat to the Statue of Liberty' : 'Boat back to the Battery')
+      : `${near.visited ? 'Revisit' : 'Visit'}: ${near.shortTitle}`;
     if (visitLabel.textContent !== label) visitLabel.textContent = label;
     if (!visitPulsed) {
       // the very first prompt glows so nobody walks past it
@@ -3009,11 +3593,13 @@ function animate() {
   for (const w of wanderers) {
     const nz = w.z + w.dir * w.speed * dt;
     const [cx2, cz2] = collide(w.x, nz);
-    if (Math.abs(cz2 - nz) > 1e-4 || Math.abs(cx2 - w.x) > 1e-4) {
-      w.dir *= -1; // blocked by a stoop, wagon, or wall — turn back, keep the lane
+    const blocked = Math.abs(cz2 - nz) > 1e-4 || Math.abs(cx2 - w.x) > 1e-4;
+    if (blocked && !w.hemmed) {
+      w.dir *= -1; // blocked by a wagon, a lamp, or a wall — turn back, keep the lane
     } else {
-      w.z = nz;
+      w.z = nz; // (blocked both ways, he was set down inside something: he walks out of it)
     }
+    w.hemmed = blocked;
     if (w.z < w.z0) { w.z = w.z0; w.dir = 1; }
     if (w.z > w.z1) { w.z = w.z1; w.dir = -1; }
     w.g.position.set(w.x, Math.abs(Math.sin(t * 7 + w.ph)) * 0.04, w.z);
@@ -3039,16 +3625,31 @@ function animate() {
     b.obj.rotation.x = Math.atan2(hF - hA, 2 * b.half) * 0.8;
     b.obj.rotation.z = Math.atan2(hR - hL, 2 * b.beam) * 0.6;
   }
-  for (const d of drifters) {
-    const p = d.obj.position;
-    p[d.axis] += d.vel * dt;
-    if (d.vel < 0 ? p[d.axis] < d.limit : p[d.axis] > d.limit) p[d.axis] = d.reset;
-  }
+  updateDrifters(dt);
+  updateLaunch(dt);
 
-  train.position.z += trainDir * dt * 9;
-  // the locomotive sits at local +z, so it faces -z (north) when turned about
-  if (train.position.z < -103) { train.position.z = -103; trainDir = 1; train.rotation.y = 0; trainWhistle(); }
-  if (train.position.z > -8) { train.position.z = -8; trainDir = -1; train.rotation.y = Math.PI; trainWhistle(); }
+  if (trainHalt > 0) {
+    trainHalt -= dt;
+    if (trainHalt <= 0) {
+      // the locomotive sits at local +z, so it faces -z (north) when turned about
+      trainDir = -trainDir;
+      train.rotation.y = trainDir > 0 ? 0 : Math.PI;
+      trainWhistle();
+    }
+  } else {
+    const end = trainDir > 0 ? TRAIN_SOUTH : TRAIN_NORTH;
+    const left = Math.abs(end - train.position.z);
+    const goal = Math.min(1, 0.06 + left / 14); // brakes on over the last few car-lengths
+    trainWay += (goal - trainWay) * Math.min(1, dt * (goal > trainWay ? 0.5 : 4));
+    const step = TRAIN_SPEED * trainWay * dt;
+    if (step < left) {
+      train.position.z += trainDir * step;
+    } else {
+      train.position.z = end;
+      trainWay = 0;
+      trainHalt = TRAIN_STAND;
+    }
+  }
 
   // --- coal smoke from the locomotive and the two moving steamers ---
   for (const s of smokeSources) {
@@ -3057,7 +3658,7 @@ function animate() {
   }
   smoke.update(dt);
   for (const s of wakeSources) {
-    s.t += dt;
+    s.t += dt * s.ship.way;
     while (s.t > s.period) { s.t -= s.period; wake.emit(s.obj, 0, s.tipY, s.tipZ, 0); }
   }
   wake.update(dt);
@@ -3118,6 +3719,83 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+/* ---------------- one last pass: fewer draw calls ----------------
+   Everything above is built the readable way — one mesh, one material per
+   box — which leaves several hundred little props each costing a draw
+   call, and a second one in the shadow pass. None of the fixed ones ever
+   moves, so they are folded together here: every plain single-colour mesh
+   under `root` goes into one vertex-coloured mesh per kind of shading and
+   shadow, and meshes that share any other material are joined under it.
+   Things that move as a body (a ship, the train) are baked within their
+   own group, so the group still moves as before. */
+
+function bake(root, skip = new Set()) {
+  root.updateMatrixWorld(true);
+  const toRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const buckets = new Map();
+  (function visit(o) {
+    if (o !== root && skip.has(o)) return;
+    for (const c of o.children) visit(c);
+    if (!o.isMesh || !o.visible || o.children.length || o.renderOrder !== 0) return;
+    const m = o.material, g = o.geometry;
+    if (Array.isArray(m) || m.transparent || !g.attributes.position || !g.attributes.normal) return;
+    const plain = m.isMeshLambertMaterial && !m.map && m.emissive.getHex() === 0;
+    const key = `${plain ? `plain|${m.flatShading}|${m.side}` : m.uuid}|${o.castShadow}|${o.receiveShadow}`;
+    if (!buckets.has(key)) buckets.set(key, { plain, meshes: [] });
+    buckets.get(key).meshes.push(o);
+  })(root);
+
+  const rel = new THREE.Matrix4();
+  for (const { plain, meshes } of buckets.values()) {
+    if (meshes.length < 2) continue;
+    if (!plain && !meshes.every((o) => o.geometry.attributes.uv)) continue;
+    const first = meshes[0];
+    const geos = meshes.map((o) => {
+      const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      for (const name of Object.keys(g.attributes)) {
+        if (name !== 'position' && name !== 'normal' && (plain || name !== 'uv')) g.deleteAttribute(name);
+      }
+      g.applyMatrix4(rel.multiplyMatrices(toRoot, o.matrixWorld));
+      if (plain) {
+        const n = g.attributes.position.count, c = o.material.color;
+        const col = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) col.set([c.r, c.g, c.b], i * 3);
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      }
+      return g;
+    });
+    const material = plain
+      ? new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: first.material.flatShading, side: first.material.side })
+      : first.material;
+    const merged = new THREE.Mesh(mergeGeometries(geos, false), material);
+    merged.castShadow = first.castShadow;
+    merged.receiveShadow = first.receiveShadow;
+    for (const o of meshes) {
+      let parent = o.parent;
+      parent.remove(o);
+      o.geometry.dispose();
+      // a group emptied by this is only a husk
+      while (parent !== root && parent.type === 'Group' && !parent.children.length && !skip.has(parent)) {
+        const up = parent.parent;
+        up.remove(parent);
+        parent = up;
+      }
+    }
+    for (const g of geos) g.dispose();
+    root.add(merged);
+  }
+}
+{
+  // whatever is animated, or is asked after by name later, is left alone
+  const moving = [
+    player, beacon, diana, train, whale,
+    ...markers.map((m) => m.g), ...gulls.map((gl) => gl.g),
+    ...bobbers.map((b) => b.obj), ...wanderers.map((w) => w.g),
+  ];
+  bake(scene, new Set([...moving, ...occluders]));
+  for (const group of [train, diana, whale, ...bobbers.map((b) => b.obj), ...wanderers.map((w) => w.g)]) bake(group);
+}
 
 // Restore a returning walker's chart before the first frame.
 for (const id of save.charted) {

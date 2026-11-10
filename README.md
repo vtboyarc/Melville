@@ -58,6 +58,16 @@ you approach on foot, and all are labeled in the chart view.
   the Web Audio API — no audio files are shipped
 - Coal smoke from the locomotive and the steamers is a single `THREE.Points`
   cloud (one draw call); the sun and clouds are canvas-textured sprites
+- The harbor's swell runs in the water's vertex shader, and the same wave is
+  evaluated in JS so every hull rides it. The shader also pales the shallows
+  along each shore (from a small baked distance-to-land texture), flecks the
+  tallest crests, and lets each facet mirror the sky at glancing angles
+- Props are written one mesh at a time for readability and then baked: at the
+  end of load every fixed, single-colour mesh is folded into a few
+  vertex-coloured meshes, and each ship and the train into one or two, which
+  cuts draw calls by roughly two-thirds
+- Nothing is drawn behind the title card, and on a machine that cannot keep
+  up the canvas steps down its pixel ratio (and then its shadow map) on its own
 - Progress is saved to `localStorage`, so the chart survives a reload
 
 ## Run locally

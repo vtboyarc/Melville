@@ -380,8 +380,10 @@ function waveHeight(wx, wz, t) {
 // along every shore.
 const SHOAL_REACH = 9;
 const shoreField = (() => {
-  const X0 = -176, Z0 = -150, STEP = 1.5, W = 236, H = 198; // W is a multiple of 4, for the one-byte rows
-  const data = new Uint8Array(W * H);
+  const X0 = -176, Z0 = -150, STEP = 1.5, W = 236, H = 198;
+  // RGBA, though only red is read: a one-channel texture has no format
+  // that a WebGL 1 context (which Three.js still falls back to) can upload
+  const data = new Uint8Array(W * H * 4).fill(255);
   const slabs = Object.values(OUTER_LAND);
   for (let j = 0; j < H; j++) {
     for (let i = 0; i < W; i++) {
@@ -394,10 +396,10 @@ const shoreField = (() => {
       if (d > 0 && x > -50 - SHOAL_REACH && x < 50 + SHOAL_REACH && z > -118 - SHOAL_REACH && z < 100 + SHOAL_REACH) {
         d = pointInPoly(x, z) ? 0 : Math.min(d, shoreDistance(x, z));
       }
-      data[j * W + i] = Math.round(255 * Math.min(1, d / SHOAL_REACH));
+      data[(j * W + i) * 4] = Math.round(255 * Math.min(1, d / SHOAL_REACH));
     }
   }
-  const tex = new THREE.DataTexture(data, W, H, THREE.RedFormat);
+  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
   tex.magFilter = tex.minFilter = THREE.LinearFilter;
   tex.needsUpdate = true;
   return { tex, origin: new THREE.Vector2(X0, Z0), size: new THREE.Vector2(W * STEP, H * STEP) };

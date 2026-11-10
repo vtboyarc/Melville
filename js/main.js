@@ -35,10 +35,27 @@ const ISLAND = [
   [18, 52], [10, 74], [4, 88],
 ];
 
-// Walkable rectangles besides the island itself (the two customs piers).
+// The harbor end of the chart. The statue stands on Bedloe's Island, off
+// the Battery; a boat crosses to it between two landing stages. Each
+// landing has its planked `pier`, the `gangway` at its end (the boat can be
+// boarded from within three paces of it), the spot where a passenger is
+// set `ashore`, and the boat's `berth`.
+const LIBERTY = { x: -44, z: 109.5 };
+const CASTLE_GARDEN = { x: -13.5, z: 82.5 }; // up the west shore, clear of the view to the statue
+const START = { x: -1, z: 91 };               // where the walker steps ashore: the head of the Battery landing
+const LANDINGS = {
+  battery: { pier: { x0: -3, x1: 1, z0: 93, z1: 103.3 }, gangway: [-1.3, 101.6], ashore: [-1.8, 101.5], berth: [-8.1, 101.5] },
+  bedloes: { pier: { x0: -35, x1: -30.25, z0: 102.2, z1: 105.8 }, gangway: [-32, 104], ashore: [-31.5, 104], berth: [-25.15, 104] },
+};
+
+// Walkable rectangles besides the island itself: the two customs piers,
+// the two landings, and Bedloe's Island. `planks` are wood underfoot.
 const WALK_RECTS = [
-  { x0: -58, x1: -39, z0: -15.5, z1: -8.5 },  // Gansevoort pier
-  { x0: 39, x1: 58, z0: -98.5, z1: -91.5 },   // East River pier
+  { x0: -58, x1: -39, z0: -15.5, z1: -8.5, planks: true },  // Gansevoort pier
+  { x0: 39, x1: 58, z0: -98.5, z1: -91.5, planks: true },   // East River pier
+  { ...LANDINGS.battery.pier, planks: true },
+  { ...LANDINGS.bedloes.pier, planks: true },
+  { x0: LIBERTY.x - 9.1, x1: LIBERTY.x + 9.1, z0: LIBERTY.z - 8.6, z1: LIBERTY.z + 8.6 }, // Bedloe's Island, inside its seawall
 ];
 
 const AVENUES = [-36, -24, -12, 0, 12, 24, 36];
@@ -49,7 +66,7 @@ const EL_X = 30; // Third Avenue El runs along x = 30, z in [-109, 0]
 
 const CLEAR_CIRCLES = SITES.map((s) => ({ x: s.pos.x, z: s.pos.z, r: 6 }));
 CLEAR_CIRCLES.push({ x: 18, z: -88.5, r: 4.5 }); // the house itself
-CLEAR_CIRCLES.push({ x: -8, z: 91, r: 6 });      // Castle Garden
+CLEAR_CIRCLES.push({ x: CASTLE_GARDEN.x, z: CASTLE_GARDEN.z, r: 6 });
 CLEAR_CIRCLES.push({ x: 19, z: 46, r: 7 });      // bridge approach
 CLEAR_CIRCLES.push({ x: 2, z: 48, r: 10 });      // City Hall and its park
 CLEAR_CIRCLES.push({ x: -2, z: 37.4, r: 6.5 });  // Federal Hall
@@ -78,7 +95,7 @@ const STREET_CUTS = [
 const OUTER_LAND = {
   jersey: { x0: -162, x1: -66, z0: -132, z1: 48 },
   brooklyn: { x0: 58, x1: 154, z0: -32, z1: 128 },
-  bedloes: { x0: -41.5, x1: -26.5, z0: 100, z1: 114 },   // under the Statue of Liberty
+  bedloes: { x0: LIBERTY.x - 9.5, x1: LIBERTY.x + 9.5, z0: LIBERTY.z - 9, z1: LIBERTY.z + 9 },
   governors: { x0: 26.5, x1: 39.5, z0: 102, z1: 110 },
 };
 
@@ -151,7 +168,16 @@ const cam = { yaw: 0, height: 5, dist: 11, smoothDist: 11, lastDrag: -10 };
 // (z ≈ 122 to -112, x ≈ ±58) fit the 55° frustum even on a portrait phone.
 const CHART_CAM_POS = new THREE.Vector3(0, 215, 120);
 const CHART_LOOK_AT = new THREE.Vector3(0, 0, 10);
-const lookTarget = new THREE.Vector3(0, 1.7, 70); // smoothed camera focus
+const lookTarget = new THREE.Vector3(START.x, 1.7, START.z); // smoothed camera focus
+// The opening view (see `opening`, below) looks past the walker to the
+// statue. The camera sits low, so that all of her fits under the top of
+// the frame, and a little off her bearing, so that she stands to one side
+// of the title and the opening note rather than behind them (by a share
+// of the view's width, which on an upright phone is not much).
+const OPENING_HEIGHT = 2.4;
+const OPENING_YAW = Math.atan2(START.x - LIBERTY.x, START.z - LIBERTY.z)
+  - 0.45 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect);
+const OPENING_CAM = { x: START.x + Math.sin(OPENING_YAW) * cam.dist, z: START.z + Math.cos(OPENING_YAW) * cam.dist };
 const occluders = []; // meshes the camera should not clip through
 
 const hemi = new THREE.HemisphereLight(0xd5e0e8, 0xb09a78, 1.15);
@@ -217,6 +243,7 @@ function aimSun(view, px, pz) {
 }
 
 const colliders = []; // axis-aligned boxes {x0,x1,z0,z1}
+const roundColliders = []; // and round ones {x,z,r}, for round buildings
 
 /* ---------------- helpers ---------------- */
 
@@ -228,6 +255,11 @@ function pointInPoly(x, z, poly = ISLAND) {
     if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
   }
   return inside;
+}
+
+// on a pier's or a landing's planking, rather than on the ground
+function onPlanks(x, z) {
+  return !pointInPoly(x, z) && WALK_RECTS.some((r) => r.planks && x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1);
 }
 
 function isWalkable(x, z) {
@@ -543,7 +575,7 @@ waterLabel('HUDSON RIVER', -58, 8, -Math.PI / 2);
 waterLabel('EAST RIVER', 50, -42, -Math.PI / 2, 34);
 waterLabel('NEW JERSEY', -92, -40, 0, 36);
 waterLabel('BROOKLYN', 92, 50, 0, 34);
-waterLabel('THE BATTERY', -2, 108, 0, 30);
+waterLabel('THE BATTERY', 5, 113, 0, 30); // south of the boat's crossing
 
 /* ---------------- streets ---------------- */
 
@@ -1375,8 +1407,8 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
 
 // The Statue of Liberty (1886) — five years old, her copper still brown.
 {
-  const lx = -34, lz = 107;
-  landSlab(OUTER_LAND.bedloes, 1.6, -0.6); // Bedloe's Island
+  const lx = LIBERTY.x, lz = LIBERTY.z;
+  landSlab(OUTER_LAND.bedloes, 1.6, -0.8); // Bedloe's Island, its top level with the Battery's: it is walked on
   // the star-shaped ramparts of Fort Wood
   const starPts = [];
   for (let i = 0; i < 22; i++) {
@@ -1390,6 +1422,8 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   star.position.set(lx, 2.2, lz);
   star.castShadow = star.receiveShadow = true;
   scene.add(star);
+  roundColliders.push({ x: lx, z: lz, r: 6.4 }); // the walk goes round the ramparts
+  parkGreen(new THREE.CircleGeometry(8.3, 28), lx, lz); // on a collar of lawn
   // stepped granite pedestal
   box(5.4, 1.3, 5.4, 0xa89c85, lx, 2.85, lz);
   const ped = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 3.1, 7.6, 4), lambert(0xb9ad97));
@@ -1397,6 +1431,7 @@ function landmarkInfo(name, year, blurb, x, z, labelY, { range = 34, w = 8, h = 
   ped.position.set(lx, 7.3, lz);
   ped.castShadow = true;
   scene.add(ped);
+  occluders.push(star, ped);
   box(4.5, 0.7, 4.5, 0xcabfa6, lx, 11.4, lz); // cornice
   box(3.2, 1.5, 3.2, 0xb3a78f, lx, 12.4, lz); // statue plinth
 
@@ -1668,7 +1703,7 @@ landmarkInfo('Castle Garden', null,
   `Built as a fort before the War of 1812, then the concert hall where all
    New York heard Jenny Lind in 1850, and from 1855 to 1890 the landing
    depot where eight million immigrants first touched America.`,
-  -8, 91, 9.5, { w: 9, h: 7, d: 9 });
+  CASTLE_GARDEN.x, CASTLE_GARDEN.z, 9.5, { w: 9, h: 7, d: 9 });
 landmarkInfo('Madison Square Garden', 1890,
   `Stanford White's colossal amphitheater of yellow brick and terra cotta
    opened in 1890, its arcaded tower the second-tallest thing in the city.
@@ -1887,16 +1922,19 @@ function tree(x, z, s = 1) {
   for (let i = 0; i < 6; i++) {
     const a = Math.random() * Math.PI * 2, r = 2.5 + Math.random() * 4;
     const tx = -2 + Math.cos(a) * r, tz = 88 + Math.sin(a) * r;
-    if (Math.hypot(tx - 2, tz - 82) > 3 && Math.hypot(tx + 8, tz - 91) > 4.5) tree(tx, tz, 0.7 + Math.random() * 0.5);
+    // not on the birthplace marker, nor on the landing, nor anywhere between
+    // the opening camera and the statue it is looking at
+    const inShot = distToSegment(tx, tz, OPENING_CAM.x, OPENING_CAM.z, LIBERTY.x, LIBERTY.z) < 3;
+    if (Math.hypot(tx - 2, tz - 82) > 3 && tz < 92.4 && !inShot) tree(tx, tz, 0.7 + Math.random() * 0.5);
   }
 }
 // Castle Garden
 {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.5, 5, 14), lambert(COLORS.stone));
-  m.position.set(-8, 2.5, 91);
+  m.position.set(CASTLE_GARDEN.x, 2.5, CASTLE_GARDEN.z);
   m.castShadow = m.receiveShadow = true;
   scene.add(m);
-  addCollider(-8, 91, 8.5, 8.5);
+  roundColliders.push({ x: CASTLE_GARDEN.x, z: CASTLE_GARDEN.z, r: 5 });
   occluders.push(m);
 }
 
@@ -2016,14 +2054,16 @@ const TRAIN_NORTH = -99.3, TRAIN_SOUTH = -9.7, TRAIN_SPEED = 9, TRAIN_STAND = 3.
 
 /* ---------------- piers & ships ---------------- */
 
-function pier(cx, cz, alongX = true) {
-  const deck = box(alongX ? 18 : 6, 0.3, alongX ? 6 : 18, COLORS.wood, cx, -0.03, cz);
+function pier(cx, cz, alongX = true, len = 18, wide = 6) {
+  const deck = box(alongX ? len : wide, 0.3, alongX ? wide : len, COLORS.wood, cx, -0.03, cz);
   deck.castShadow = true;
-  const n = 5;
+  const n = Math.max(2, Math.round(len / 4.5) + 1); // a pair of piles every few paces
+  const along = len / 2 - 1, across = wide / 2 - 0.5;
   for (let i = 0; i < n; i++) {
-    const t = -1 + (2 * i) / (n - 1);
-    box(0.5, 1.6, 0.5, COLORS.woodDark, cx + (alongX ? t * 8 : 2.5), -0.6, cz + (alongX ? 2.5 : t * 8), scene, false);
-    box(0.5, 1.6, 0.5, COLORS.woodDark, cx + (alongX ? t * 8 : -2.5), -0.6, cz + (alongX ? -2.5 : t * 8), scene, false);
+    const t = (-1 + (2 * i) / (n - 1)) * along;
+    for (const side of [-across, across]) {
+      box(0.5, 1.6, 0.5, COLORS.woodDark, cx + (alongX ? t : side), -0.6, cz + (alongX ? side : t), scene, false);
+    }
   }
 }
 
@@ -2049,6 +2089,10 @@ pier(-49, -12);
 // East River pier
 pier(49, -95);
 barrels(45, -93.5);
+// The landing stages of the boat to the statue: one running out from the
+// tip of the Battery, one on the near side of Bedloe's Island.
+pier(-1, 98.5, false, 10, 4);
+pier(-32.4, 104, true, 4.7, 4);
 
 const bobbers = []; // things that ride the water
 
@@ -2221,9 +2265,8 @@ function drifter(obj, axis, a, b, speed, smokes = false) {
   return { obj, axis, a, b, speed, smokes, mark: b, way: 1, turn: 0, fromYaw: 0 };
 }
 const drifters = [
-  drifter(sailShip(-62, 70, 1), 'z', 96, -150, 3.2),          // beating up the Hudson, past the customs pier
+  drifter(sailShip(-62, 60, 1), 'z', 78, -150, 3.2),          // beating up the Hudson, past the customs pier
   drifter(steamShip(42.5, 40), 'z', 64, -22, 4, true),        // the East River boat, under the bridge and back
-  drifter(steamShip(-30, 98), 'x', -60, 48, 4.5, true),       // harbor ferry, hugging the Battery
 ];
 const COME_ABOUT = 9; // seconds to swing a hull end for end
 function updateDrifters(dt) {
@@ -2248,6 +2291,93 @@ function updateDrifters(dt) {
       d.fromYaw = d.obj.rotation.y;
       d.mark = d.mark === d.b ? d.a : d.b;
     }
+  }
+}
+
+// The boat to the Statue of Liberty: an open steam launch, built to the
+// walker's own scale because he stands in her bow. She lies at whichever
+// landing he is at, stern to the stage; boarding her starts the crossing,
+// and once she has set him ashore she swings round to be ready to return.
+const LAUNCH_DECK = 0.8;
+function steamLaunch() {
+  const g = new THREE.Group();
+  hullSlab(2.6, 9, 0.7, 1.0, 0.75, 0x2f2d2a, g);
+  hullSlab(2.74, 9.16, 0.7, 0.32, 0.97, 0xcdbf9d, g, 0.17);                       // the rail
+  hullSlab(2.3, 8.6, 0.7, 0.06, LAUNCH_DECK, 0xa89069, g).castShadow = false;     // the deck
+  const boiler = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1, 10), lambert(0x3a352e));
+  boiler.position.set(0, LAUNCH_DECK + 0.5, 0.2);
+  const funnel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 2.5, 8), lambert(0x26221d));
+  funnel.position.set(0, LAUNCH_DECK + 2.25, 0.2);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.24, 0.35, 8), lambert(COLORS.red));
+  band.position.set(0, LAUNCH_DECK + 2.95, 0.2);
+  boiler.castShadow = funnel.castShadow = true;
+  g.add(boiler, funnel, band);
+  box(2.3, 0.08, 3.6, 0xd8cdb2, 0, LAUNCH_DECK + 2.45, -2.5, g);                  // an awning over the benches aft
+  for (const sx of [-1.05, 1.05]) {
+    box(0.4, 0.3, 3.2, 0x8a6f4d, sx * 0.76, LAUNCH_DECK + 0.2, -2.5, g, false);
+    for (const sz of [-4.2, -0.8]) {
+      cylBetween(new THREE.Vector3(sx, LAUNCH_DECK, sz), new THREE.Vector3(sx, LAUNCH_DECK + 2.45, sz), 0.04, COLORS.woodDark, g);
+    }
+  }
+  cylBetween(new THREE.Vector3(0, LAUNCH_DECK, 4), new THREE.Vector3(0, LAUNCH_DECK + 2.6, 4), 0.05, COLORS.woodDark, g); // jackstaff
+  canvasPanel(g, [[0, LAUNCH_DECK + 2.55, 4], [0, LAUNCH_DECK + 2.05, 4], [0, LAUNCH_DECK + 2.3, 2.95]], pennantMat);
+  g.rotation.order = 'YXZ';
+  g.userData.stern = -4.6;
+  g.userData.funnel = { y: LAUNCH_DECK + 3.55, z: 0.2 };
+  scene.add(g);
+  bobbers.push({ obj: g, half: 4.5, beam: 1.3 });
+  return g;
+}
+const LAUNCH_CROSSING = 10; // seconds from one landing to the other
+const LAUNCH_SWING = 6;     // and to swing her end for end afterwards
+const launch = { obj: steamLaunch(), at: 'battery', dest: 'bedloes', phase: 'moored', u: 0, way: 0, fromYaw: 0, greeted: false };
+{
+  const [ax, az] = LANDINGS.battery.berth, [bx, bz] = LANDINGS.bedloes.berth;
+  launch.obj.position.set(ax, 0, az);
+  launch.obj.rotation.y = Math.atan2(bx - ax, bz - az); // bow toward the statue
+}
+function boardLaunch() {
+  if (launch.phase !== 'moored' || state.modal) return;
+  launch.phase = 'crossing';
+  launch.dest = launch.at === 'battery' ? 'bedloes' : 'battery';
+  launch.u = 0;
+  state.riding = true;
+  vel.x = vel.z = 0;
+  audio.play('horn', { freq: 147, gain: 0.2, dur: 1.2 });
+}
+const _rider = new THREE.Vector3();
+function updateLaunch(dt) {
+  const L = launch;
+  if (L.phase === 'crossing') {
+    L.u = Math.min(1, L.u + dt / LAUNCH_CROSSING);
+    const [fx, fz] = LANDINGS[L.at].berth, [tx, tz] = LANDINGS[L.dest].berth;
+    const e = smoothstep01(L.u);
+    L.obj.position.x = fx + (tx - fx) * e;
+    L.obj.position.z = fz + (tz - fz) * e;
+    L.way = Math.min(1, 6 * L.u * (1 - L.u)); // she gathers way, and loses it coming alongside
+    if (L.u >= 1) { // alongside: the passenger steps onto the stage, and she swings
+      L.at = L.dest;
+      L.phase = 'swinging';
+      L.u = 0;
+      L.way = 0;
+      L.fromYaw = L.obj.rotation.y;
+      state.riding = false;
+      const [sx, sz] = LANDINGS[L.at].ashore;
+      player.position.set(sx, 0, sz);
+      if (L.at === 'bedloes' && !L.greeted) {
+        L.greeted = true;
+        toast('Bedloe’s Island. Walk round the ramparts — tap the statue to read her story. The boat waits at the landing.', 6500);
+      }
+    }
+  } else if (L.phase === 'swinging') {
+    L.u = Math.min(1, L.u + dt / LAUNCH_SWING);
+    L.obj.rotation.y = L.fromYaw + Math.PI * smoothstep01(L.u);
+    if (L.u >= 1) L.phase = 'moored';
+  }
+  if (state.riding) { // he stands in the bow, and rides the swell with her
+    L.obj.updateMatrixWorld();
+    player.position.copy(L.obj.localToWorld(_rider.set(0, LAUNCH_DECK, 2.4)));
+    player.rotation.y = L.obj.rotation.y;
   }
 }
 
@@ -2468,8 +2598,9 @@ const smokeSources = [
     .filter((d) => d.smokes)
     .map((d) => ({ obj: d.obj, period: 0.45, tipY: d.obj.userData.funnel.y, tipZ: d.obj.userData.funnel.z, vy: 1.7, t: 0 })),
 ];
+smokeSources.push({ obj: launch.obj, period: 0.6, tipY: launch.obj.userData.funnel.y, tipZ: launch.obj.userData.funnel.z, vy: 1.3, t: 0 });
 // every ship under way trails foam from its stern — as much as she has way on
-const wakeSources = drifters.map((d) => ({ ship: d, obj: d.obj, period: 0.14, tipY: 0.45, tipZ: d.obj.userData.stern, t: 0 }));
+const wakeSources = [...drifters, launch].map((d) => ({ ship: d, obj: d.obj, period: 0.14, tipY: 0.45, tipZ: d.obj.userData.stern, t: 0 }));
 
 // "The Tide Turns": once the chart is complete the whole island settles
 // into a permanent golden hour. warmth runs 0 (day) to 1 (dusk).
@@ -2564,9 +2695,17 @@ armL.castShadow = armR.castShadow = true;
 player.add(armL, armR);
 player.rotation.order = 'YXZ'; // heading first, so the walking lean stays in his own frame
 player.scale.setScalar(0.58); // a man among five-storey buildings
-player.position.set(0, 0, 70);
+player.position.set(START.x, 0, START.z);
 player.rotation.y = Math.PI; // facing north, up the island
 scene.add(player);
+
+// The opening view looks past him, out across the harbor to the statue —
+// so it is plain from the first frame that she is there, and that the
+// landing behind him is the way to her. A moment later the camera swings
+// round to the city, unless the walker has already taken charge of it.
+cam.height = OPENING_HEIGHT;
+cam.yaw = OPENING_YAW;
+let opening = 0; // seconds since stepping ashore; -1 once the view is the walker's own
 
 camera.position.set(
   player.position.x + Math.sin(cam.yaw) * cam.dist,
@@ -2684,7 +2823,7 @@ window.addEventListener('wheel', (e) => {
 
 /* ---------------- UI ---------------- */
 
-const state = { started: false, modal: false, visitedCount: 0, nearSite: null, epilogueShown: false, view: 'street' };
+const state = { started: false, modal: false, visitedCount: 0, nearSite: null, nearBoat: false, riding: false, epilogueShown: false, view: 'street' };
 
 // The chart remembers: visited sites persist across sessions.
 const SAVE_KEY = 'melville-charted-v1';
@@ -2794,7 +2933,8 @@ document.getElementById('start-btn').addEventListener('click', () => {
   if (window.innerWidth < 700 || window.innerHeight < 500) document.getElementById('chart-key').removeAttribute('open');
   toast(save.charted.length > 0
     ? 'Back ashore. The chart remembers what you have already found.'
-    : 'You step ashore at the Battery. Six red markers wait on the island — the compass points to the nearest.');
+    : 'You step ashore at the Battery. Six red markers wait on the island — the compass points to the nearest. The boat at the landing crosses to the Statue of Liberty.',
+    save.charted.length > 0 ? 4200 : 7500);
   showTouchHint();
 });
 
@@ -2813,9 +2953,11 @@ releasePointerFocus(muteBtn);
 audio.setMuted(save.muted);
 reflectMute();
 
+// The one prompt serves both: a site to visit, or the boat to board.
 function tryVisit() {
-  if (!state.nearSite || state.modal) return;
-  openCard(state.nearSite);
+  if (state.modal || state.riding) return;
+  if (state.nearBoat) boardLaunch();
+  else if (state.nearSite) openCard(state.nearSite);
 }
 visitBtn.addEventListener('click', tryVisit);
 
@@ -2976,7 +3118,7 @@ function showEpilogue() {
 // tap skips it; the dusk it leaves behind is permanent.
 let finale = null;
 let finaleQueued = false; // armed on the sixth card-close; lifts off once the pin FX has played
-const LIBERTY_LOOK = new THREE.Vector3(-33, 15, 107);
+const LIBERTY_LOOK = new THREE.Vector3(LIBERTY.x + 1, 15, LIBERTY.z);
 function startFinale() {
   if (state.view === 'chart') toggleView();
   state.modal = true; // freezes the walker and hides the visit button
@@ -3106,6 +3248,14 @@ function collide(px, pz) {
         hit = true;
       }
     }
+    for (const c of roundColliders) { // straight out from the centre
+      const dx = px - c.x, dz = pz - c.z, d = Math.hypot(dx, dz);
+      if (d < c.r) {
+        px = d > 1e-6 ? c.x + (dx / d) * c.r : c.x + c.r;
+        pz = d > 1e-6 ? c.z + (dz / d) * c.r : c.z;
+        hit = true;
+      }
+    }
     if (!hit) break;
   }
   return [px, pz];
@@ -3218,7 +3368,7 @@ function animate() {
   // the input is a goal velocity; the walker eases into his stride and
   // takes a short step to stop, rather than snapping between the two
   let goalX = 0, goalZ = 0;
-  if (state.started && !state.modal) {
+  if (state.started && !state.modal && !state.riding) {
     const [mx, mz] = moveInput();
     goalX = rightX * mx + fwdX * -mz;
     goalZ = rightZ * mx + fwdZ * -mz;
@@ -3246,7 +3396,7 @@ function animate() {
   // each leg-swing crossing is a footfall — planks on the piers, stone ashore
   const stepSign = Math.sin(walkPhase) >= 0;
   if (moving > 0.01 && stepSign !== lastStepSign) {
-    audio.play(pointInPoly(player.position.x, player.position.z) ? 'step' : 'stepWood');
+    audio.play(onPlanks(player.position.x, player.position.z) ? 'stepWood' : 'step');
   }
   lastStepSign = stepSign;
 
@@ -3270,6 +3420,21 @@ function animate() {
     _camPos.copy(CHART_CAM_POS);
     _lookGoal.copy(CHART_LOOK_AT);
   } else {
+    if (opening >= 0) {
+      opening += dt;
+      if (wantsToMove || state.riding || cam.lastDrag >= 0) {
+        opening = -1; // the walker has taken charge of the view
+      } else if (opening > 2.6) {
+        const k = 1 - Math.pow(0.3, dt);
+        cam.yaw = angleLerp(cam.yaw, 0, k); // round to the city, behind him
+        cam.height += (5 - cam.height) * k; // and up to the usual vantage
+        if (Math.abs(Math.atan2(Math.sin(cam.yaw), Math.cos(cam.yaw))) < 0.02) { opening = -1; cam.height = 5; }
+      }
+    }
+    // aboard the boat the camera rides astern of her
+    if (state.riding && t - cam.lastDrag > 2.2) {
+      cam.yaw = angleLerp(cam.yaw, launch.obj.rotation.y + Math.PI, 1 - Math.pow(0.2, dt));
+    }
     if (moving > 0.05 && t - cam.lastDrag > 2.2) {
       // The camera swings in behind the walker — but only as far as he is
       // walking away from it or across its view. His heading is steered
@@ -3330,10 +3495,15 @@ function animate() {
   state.nearSite = near;
 
   // --- visit prompt, recomputed from proximity + modal state each frame ---
-  const promptOn = !!near && state.started && !state.modal;
+  // the boat can be boarded from the end of whichever landing she lies at
+  const [gx, gz] = LANDINGS[launch.at].gangway;
+  state.nearBoat = launch.phase === 'moored' && Math.hypot(player.position.x - gx, player.position.z - gz) < 3;
+  const promptOn = (state.nearBoat || !!near) && state.started && !state.modal && !state.riding;
   visitBtn.classList.toggle('hidden', !promptOn);
   if (promptOn) {
-    const label = `${near.visited ? 'Revisit' : 'Visit'}: ${near.shortTitle}`;
+    const label = state.nearBoat
+      ? (launch.at === 'battery' ? 'Boat to the Statue of Liberty' : 'Boat back to the Battery')
+      : `${near.visited ? 'Revisit' : 'Visit'}: ${near.shortTitle}`;
     if (visitLabel.textContent !== label) visitLabel.textContent = label;
     if (!visitPulsed) {
       // the very first prompt glows so nobody walks past it
@@ -3423,11 +3593,13 @@ function animate() {
   for (const w of wanderers) {
     const nz = w.z + w.dir * w.speed * dt;
     const [cx2, cz2] = collide(w.x, nz);
-    if (Math.abs(cz2 - nz) > 1e-4 || Math.abs(cx2 - w.x) > 1e-4) {
-      w.dir *= -1; // blocked by a stoop, wagon, or wall — turn back, keep the lane
+    const blocked = Math.abs(cz2 - nz) > 1e-4 || Math.abs(cx2 - w.x) > 1e-4;
+    if (blocked && !w.hemmed) {
+      w.dir *= -1; // blocked by a wagon, a lamp, or a wall — turn back, keep the lane
     } else {
-      w.z = nz;
+      w.z = nz; // (blocked both ways, he was set down inside something: he walks out of it)
     }
+    w.hemmed = blocked;
     if (w.z < w.z0) { w.z = w.z0; w.dir = 1; }
     if (w.z > w.z1) { w.z = w.z1; w.dir = -1; }
     w.g.position.set(w.x, Math.abs(Math.sin(t * 7 + w.ph)) * 0.04, w.z);
@@ -3454,6 +3626,7 @@ function animate() {
     b.obj.rotation.z = Math.atan2(hR - hL, 2 * b.beam) * 0.6;
   }
   updateDrifters(dt);
+  updateLaunch(dt);
 
   if (trainHalt > 0) {
     trainHalt -= dt;

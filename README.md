@@ -27,6 +27,7 @@ Own,"* The New York Times, January 19, 1982):
 - **Drag** (mouse, or right thumb on touch screens) to look around; left thumb is the walk joystick; **scroll** to bring the camera in or out
 - **M** (or the Chart View button) toggles a bird's-eye view of the whole island, in the spirit of the original 1982 map
 - **Tap** any pin or landmark, on the streets or from the chart, to read its story; a site is charted only on foot, standing at its marker
+- A **boat** lies at the landing on the tip of the Battery, where the walk begins: board it from the end of the stage (**E**, or the on-screen button) to cross to the Statue of Liberty, walk round her ramparts, and ride back
 - **Escape** closes an open card
 - The compass points to the nearest uncharted site; the Chart Key tracks progress
 - Charted sites are remembered between visits ("begin a new chart" on the
@@ -37,7 +38,8 @@ Own,"* The New York Times, January 19, 1982):
 
 Beyond the six Melville sites, the island carries the landmarks of his New
 York — everything shown stood by September 1891: the Statue of Liberty
-(1886, her copper still brown), Castle Williams on Governors Island, Castle
+(1886, her copper still brown; a steam launch crosses to Bedloe's Island
+from the Battery), Castle Williams on Governors Island, Castle
 Garden, City Hall (1812), Federal Hall with its Washington statue (1883),
 Trinity Church (1846), the Tribune (1875) and Western Union (1875)
 buildings, the gold-domed World Building (1890), Cooper Union (1859),
